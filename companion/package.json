@@ -3,6 +3,24 @@
   "version": "1.0.0",
   "description": "One-command setup (npx archivist-connect) plus the optional Claude Code companion (auto-capture, sweep, session index) for the Archivist shared-memory MCP server.",
   "type": "module",
+  "license": "MIT",
+  "author": "Enrico Schintu",
+  "homepage": "https://github.com/CODEPRESS-SRL/archivist/tree/main/companion#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CODEPRESS-SRL/archivist.git",
+    "directory": "companion"
+  },
+  "bugs": {
+    "url": "https://github.com/CODEPRESS-SRL/archivist/issues"
+  },
+  "keywords": [
+    "archivist",
+    "mcp",
+    "claude-code",
+    "memory",
+    "agent-memory"
+  ],
   "bin": { "archivist-connect": "./scripts/connect.js" },
   "scripts": {
     "test": "node --test"

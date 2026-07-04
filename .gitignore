@@ -28,3 +28,6 @@ pg_data/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Superpowers working docs (specs/plans) — local only, never committed
+docs/superpowers/
