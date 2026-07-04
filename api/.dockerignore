@@ -1,0 +1,9 @@
+# Never ship the host virtualenv or caches into the build context — the
+# image builds its own venv in the builder stage.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+tests/

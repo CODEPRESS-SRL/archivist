@@ -1,0 +1,119 @@
+# archivist-companion
+
+Optional Claude Code plugin for the [Archivist](../README.md) shared-memory
+MCP server. Archivist's manual protocol (search/append/upsert via the MCP
+tools) works standalone; this plugin automates the parts of that protocol
+that a human would otherwise have to remember to do. Every component is
+**fail-silent**: if the Archivist server is down, the API key is missing, or
+`node` can't be found, the hook exits quietly and the session is unaffected.
+
+## What it does
+
+- **C1 — SessionEnd auto-capture.** At the end of a session, refines
+  whatever was substantive into at most 3 memories via a headless
+  `claude -p` run (default model `haiku`). Gated so trivial sessions cost
+  nothing: it only fires when the transcript is at least `gateMinChars`
+  characters (default 2000) or at least one file was edited during the
+  session.
+- **C2 — sweep.** Compacts keywords that are `compaction_due` *and* older
+  than `sweepGraceDays` (default 3) — entries younger than the grace window
+  are left for an in-session reader to compact for free. Zero LLM calls when
+  nothing is due. Available two ways:
+  - in-session: `/archivist-companion:sweep`
+  - out-of-session, for cron / Task Scheduler: `node companion/scripts/sweep-cli.js`
+- **C3 — SessionStart index.** Injects an LLM-free keyword index for the
+  current project — one cheap MCP `memory_list` call, no headless run. Each
+  line is a keyword, flagged with `⚠ compaction due` when applicable.
+
+> **Deviation from a content-preview index:** the C3 index lists keywords and
+> a compaction-due flag only, not content previews. `memory_list` does not
+> return content, so a preview would require an additive change to the
+> Archivist server; out of scope for this plugin.
+
+## Requirements
+
+- `node` on `PATH`.
+- A running Archivist server and a team API key.
+
+**Windows note:** the capture (C1) and sweep (C2) runs spawn `claude` via
+Node's `child_process.spawn` with no shell. On Windows, if `claude` is
+installed only as a `.cmd`/npm shim rather than a bare executable resolvable
+by a shell-less spawn, those runs fail silently — by design, so they never
+crash your session, but they also do nothing. If auto-capture or sweep
+appear to do nothing on Windows, verify `claude` is invocable as a bare
+command from a non-shell process. (The C3 index is unaffected, since it
+never spawns `claude`.)
+
+## Install
+
+**Marketplace:**
+
+```bash
+/plugin marketplace add <repo>
+/plugin install archivist-companion@archivist-tools
+```
+
+**Local (no marketplace):**
+
+```bash
+claude --plugin-dir companion
+```
+
+## Configuration
+
+Config lives at `~/.archivist-companion.json` (override the path with
+`ARCHIVIST_COMPANION_CONFIG`). A missing or malformed file simply falls back
+to defaults — nothing throws. See
+[`.archivist-companion.example.json`](./.archivist-companion.example.json)
+for a starting point.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `serverUrl` | `null` | Archivist MCP endpoint, e.g. `https://archivist.example.com/mcp/` |
+| `apiKey` | `null` | Team API key (`arc_...`) |
+| `capture` | `true` | Enable C1 SessionEnd auto-capture |
+| `index` | `true` | Enable C3 SessionStart index injection |
+| `captureModel` | `"haiku"` | Model used for the C1 capture run |
+| `captureMaxTurns` | `12` | Max turns for the C1 headless run |
+| `gateMinChars` | `2000` | Transcript size (chars) above which C1 fires even without a file edit |
+| `sweepGraceDays` | `3` | Age (days) a `compaction_due` keyword must reach before the sweep compacts it |
+| `sweepModel` | `"sonnet"` | Model used for each C2 merge run |
+| `sweepMaxTurns` | `12` | Max turns for each C2 merge run |
+
+`serverUrl` and `apiKey` can also be set via environment variables, which
+take precedence over the file:
+
+- `ARCHIVIST_SERVER_URL`
+- `ARCHIVIST_API_KEY`
+- `ARCHIVIST_COMPANION_CONFIG` — alternate path to the config file itself
+
+The plugin considers itself configured only when both `serverUrl` and
+`apiKey` are set (from file or env); otherwise C1, C2, and C3 all no-op.
+
+## Scheduling the sweep
+
+Point cron (or Windows Task Scheduler) at:
+
+```bash
+node companion/scripts/sweep-cli.js
+```
+
+It reads config the same way as the in-session hooks, runs the sweep, prints
+a JSON summary (`{ slug, compacted, failed }`), and always exits 0.
+
+**Important:** the scheduler's environment must *not* set
+`ARCHIVIST_HEADLESS=1`. That variable is how the plugin's own headless
+`claude -p` runs (spawned by C1/C2) signal "don't recurse" to their own
+hooks — every entry script checks it first and exits immediately if it's
+set. If your cron/Task Scheduler environment happens to already export it
+(e.g. inherited from a parent headless run), the sweep will silently no-op.
+
+## Cost model
+
+- **Capture (C1)** spawns at most one headless LLM run per substantive
+  session, on the cheap model (`haiku` by default). Trivial sessions never
+  reach the spawn.
+- **Sweep (C2)** is zero-cost — no LLM call at all — whenever no keyword is
+  both `compaction_due` and past its grace window.
+- **Index (C3)** is always LLM-free: one `memory_list` read formatted
+  locally.

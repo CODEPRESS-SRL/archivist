@@ -1,0 +1,119 @@
+# Prod stack: Caddy (TLS) → api → db. Run on the VPS with:
+#   docker compose -f docker-compose.prod.yml up -d
+# Config comes from .env on the server (never committed). Unlike the dev
+# compose, NOTHING here ships a working default for the database password:
+# POSTGRES_PASSWORD is mandatory (see below) and only Caddy publishes host
+# ports. See SECURITY.md — prod network architecture.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The only host-published ports in prod: 80 (ACME + HTTP→HTTPS redirect)
+    # and 443 (TLS, incl. HTTP/3 over UDP). api and db publish nothing.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Consumed by Caddyfile.prod as {$ARCHIVIST_DOMAIN}; drives the cert.
+      ARCHIVIST_DOMAIN: ${ARCHIVIST_DOMAIN:?ARCHIVIST_DOMAIN is required (the public FQDN, e.g. archivist.example.com)}
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      # Persist issued certificates + ACME account across restarts, so a
+      # bounce never re-hits Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      - edge
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Single source of the password: only POSTGRES_PASSWORD is set by the
+      # operator; the URL is assembled from it so the secret lives in one place.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-archivist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set a strong secret in .env)}@db:5432/${POSTGRES_DB:-archivist}
+      # /admin session signing key. Mandatory in prod (no default): without a
+      # stable value the app falls back to an ephemeral secret and every restart
+      # invalidates all admin sessions. Must be an explicit non-empty secret.
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?ADMIN_SESSION_SECRET is required (a stable secret so /admin sessions survive restarts)}
+      # Trusted proxy ranges for X-Forwarded-For (admin login throttle keys on the
+      # real client behind Caddy). Safe default = loopback + private/Docker ranges;
+      # never "*". An operator override in .env now actually reaches the container.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Apply migrations, then run the prod-style server (no --reload, no host
+    # port). alembic upgrade head is idempotent, so this is safe on restart.
+    command:
+      - sh
+      - -c
+      - >
+        alembic upgrade head &&
+        exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000
+    healthcheck:
+      # /healthz runs SELECT 1, so a healthy api implies a reachable db too.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      # Reachable by Caddy on `edge`; reaches the db on the isolated `internal`.
+      - edge
+      - internal
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-archivist}
+      # Mandatory, no default: compose refuses to start without it.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set a strong secret in .env)}
+      POSTGRES_DB: ${POSTGRES_DB:-archivist}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-archivist} -d ${POSTGRES_DB:-archivist}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      # Only on the internal network: no route to or from the internet.
+      - internal
+
+  embed-worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-archivist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set a strong secret in .env)}@db:5432/${POSTGRES_DB:-archivist}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    networks:
+      # Only needs db access; never serves HTTP, so no route to `edge`.
+      - internal
+
+networks:
+  # Caddy ↔ api. Caddy also bridges to the host via its published ports.
+  edge:
+  # api ↔ db, marked internal so Docker attaches no gateway: the database
+  # has no path to the internet and is unreachable from the host.
+  internal:
+    internal: true
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

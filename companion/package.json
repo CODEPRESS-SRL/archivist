@@ -1,0 +1,10 @@
+{
+  "name": "archivist-companion",
+  "version": "1.0.0",
+  "description": "Optional Claude Code companion for the Archivist shared-memory MCP server: auto-capture, sweep, and session index.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}

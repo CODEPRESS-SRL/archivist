@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Projects</h1>
+<p>
+  <a href="/admin/reports/stale">Stale report</a> ·
+  <a href="/admin/reports/duplicates">Duplicate keywords</a>
+</p>
+{% if not projects %}<p>No projects yet.</p>{% endif %}
+<table>
+  <thead><tr><th>Project</th><th>Entries</th></tr></thead>
+  <tbody>
+  {% for p in projects %}
+    <tr>
+      <td><a href="/admin/projects/{{ p.slug }}">{{ p.slug }}</a></td>
+      <td>{{ p.memory_count }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

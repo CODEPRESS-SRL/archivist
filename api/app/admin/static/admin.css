@@ -1,0 +1,20 @@
+:root { --fg: #1c1c1c; --muted: #666; --line: #e2e2e2; --accent: #2b6cb0; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: var(--fg); }
+.topbar { display: flex; justify-content: space-between; align-items: center;
+  padding: .7rem 1.2rem; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+.topbar .team { color: var(--muted); margin-right: 1rem; }
+main { max-width: 900px; margin: 1.5rem auto; padding: 0 1.2rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+a { color: var(--accent); }
+.flash { background: #edf7ed; padding: .5rem .8rem; border-radius: 4px; }
+.error { color: #b00020; }
+.badge { background: #fff3cd; padding: 0 .4rem; border-radius: 3px; font-size: .85em; }
+pre.content { white-space: pre-wrap; background: #fafafa; padding: .8rem;
+  border: 1px solid var(--line); border-radius: 4px; }
+form.inline { display: inline; }
+button { cursor: pointer; }
+.logout button { background: none; border: 0; padding: 0; color: var(--accent);
+  font: inherit; cursor: pointer; text-decoration: underline; }

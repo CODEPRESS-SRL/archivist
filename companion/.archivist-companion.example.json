@@ -1,0 +1,12 @@
+{
+  "serverUrl": "https://archivist.example.com/mcp/",
+  "apiKey": "arc_replace_me",
+  "capture": true,
+  "index": true,
+  "captureModel": "haiku",
+  "captureMaxTurns": 12,
+  "gateMinChars": 2000,
+  "sweepGraceDays": 3,
+  "sweepModel": "sonnet",
+  "sweepMaxTurns": 12
+}

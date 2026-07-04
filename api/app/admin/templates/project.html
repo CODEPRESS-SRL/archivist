@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/admin">&larr; projects</a></p>
+<h1>{{ slug }}</h1>
+
+<form method="get" action="/admin/projects/{{ slug }}">
+  <input type="search" name="q" value="{{ q or '' }}" placeholder="search…">
+  <button type="submit">Search</button>
+</form>
+
+{% if results is not none %}
+  <h2>Search results</h2>
+  {% if not results %}<p>No matches.</p>{% endif %}
+  <ul>
+  {% for r in results %}
+    <li><a href="/admin/memory/{{ r.keyword }}?project={{ slug }}">{{ r.keyword }}</a>
+      — {{ r.excerpt }}</li>
+  {% endfor %}
+  </ul>
+{% endif %}
+
+<h2>Entries</h2>
+{% if not entries %}<p>No entries.</p>{% endif %}
+<table>
+  <thead><tr><th>Keyword</th><th>Tokens</th><th>Pending</th><th>Updated</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr>
+      <td><a href="/admin/memory/{{ e.keyword }}?project={{ slug }}">{{ e.keyword }}</a>
+        {% if e.compaction_due %}<span class="badge">compaction due</span>{% endif %}</td>
+      <td>{{ e.token_count }}</td>
+      <td>{{ e.pending_fragments }}</td>
+      <td>{{ e.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

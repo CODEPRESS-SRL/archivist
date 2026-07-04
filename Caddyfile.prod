@@ -1,0 +1,21 @@
+# Prod reverse proxy. The site address is the public FQDN, injected from
+# the ARCHIVIST_DOMAIN env var (set in .env, passed to the caddy service in
+# docker-compose.prod.yml). Naming a domain here makes Caddy obtain and
+# renew a Let's Encrypt certificate automatically and redirect HTTP→HTTPS.
+
+{$ARCHIVIST_DOMAIN} {
+	# All app traffic (including /mcp, /healthz, and the server-rendered
+	# /admin console + its /admin/static assets) goes to the api service over
+	# the internal Docker network. Bearer auth / admin session auth is
+	# enforced by the app, not here.
+	reverse_proxy api:8000
+
+	header {
+		# Force HTTPS for a year, incl. subdomains; eligible for preload.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Stop browsers/proxies from MIME-sniffing tool responses.
+		X-Content-Type-Options "nosniff"
+		# Don't advertise the backend server.
+		-Server
+	}
+}

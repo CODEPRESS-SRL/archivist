@@ -1,0 +1,30 @@
+# Environment / secrets
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Alembic: no exclusions — migrations ARE committed
+
+# Docker / runtime
+caddy_data/
+pg_data/
+
+# Backups
+*.dump
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

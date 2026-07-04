@@ -1,0 +1,7 @@
+{
+  "name": "archivist-companion",
+  "description": "Auto-capture at session end, sweep pending compactions, and inject a project memory index at session start for the Archivist MCP server.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "keywords": ["archivist", "memory", "mcp"]
+}

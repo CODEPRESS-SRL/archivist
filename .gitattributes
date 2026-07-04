@@ -1,0 +1,6 @@
+# Shell scripts must always be checked out with LF endings. This repo is
+# edited on Windows, but the *.sh scripts (backup.sh, restore.sh, …) run on
+# the Linux VPS: a CRLF shebang makes the kernel look for `/bin/sh\r` and
+# fails with "bad interpreter". Forcing eol=lf means the server never needs a
+# manual `sed -i 's/\r$//'` after a checkout or a tar|ssh ship.
+*.sh text eol=lf

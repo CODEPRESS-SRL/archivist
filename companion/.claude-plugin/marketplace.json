@@ -1,0 +1,11 @@
+{
+  "name": "archivist-tools",
+  "owner": { "name": "Archivist" },
+  "plugins": [
+    {
+      "name": "archivist-companion",
+      "source": "./companion",
+      "description": "Session-end auto-capture, sweep, and session-start memory index for Archivist."
+    }
+  ]
+}
