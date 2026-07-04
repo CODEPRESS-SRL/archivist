@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { createClient as realCreateClient } from "./mcp-client.js";
 import { deriveSlug as realDeriveSlug } from "./slug.js";
+import { writeAgentRules as realWriteAgentRules } from "./rules.js";
 
 export const USAGE = `archivist-connect — connect this machine's coding agent to an Archivist server.
 
@@ -17,12 +18,13 @@ Options:
   --key <arc_...>       Team API key
   --scope <s>           Claude Code scope: user | project | local (default: user)
   --no-companion        Register MCP only; skip companion install + config
+  --no-rules            Skip writing the Archivist rule into agent rules files
   --yes                 Non-interactive; fail instead of prompting for missing values
   -h, --help            Show this help
 `;
 
 export function parseArgs(argv) {
-  const out = { server: null, key: null, scope: "user", companion: true, yes: false, help: false };
+  const out = { server: null, key: null, scope: "user", companion: true, rules: true, yes: false, help: false };
   const it = [...argv];
   while (it.length) {
     let a = it.shift();
@@ -37,6 +39,7 @@ export function parseArgs(argv) {
       case "--key": out.key = next(); break;
       case "--scope": out.scope = next(); break;
       case "--no-companion": out.companion = false; break;
+      case "--no-rules": out.rules = false; break;
       case "--yes": out.yes = true; break;
       case "-h":
       case "--help": out.help = true; break;
@@ -165,6 +168,7 @@ export async function run({ argv, deps = {} }) {
   const _verify = deps.verify || verify;
   const _registerClaudeMcp = deps.registerClaudeMcp || registerClaudeMcp;
   const _writeAgentConfigs = deps.writeAgentConfigs || writeAgentConfigs;
+  const _writeAgentRules = deps.writeAgentRules || realWriteAgentRules;
   const _installCompanion = deps.installCompanion || installCompanion;
   const _writeCompanionConfig = deps.writeCompanionConfig || writeCompanionConfig;
 
@@ -209,6 +213,16 @@ export async function run({ argv, deps = {} }) {
     if (agents.cursor) log("✓ added archivist to ~/.cursor/mcp.json");
   } catch (err) {
     log(`• could not write agent configs: ${err && err.message ? err.message : String(err)}`);
+  }
+
+  if (args.rules) {
+    try {
+      const rules = _writeAgentRules({ home });
+      if (rules.claude) log("✓ added Archivist rule to ~/.claude/CLAUDE.md");
+      if (rules.codex) log("✓ added Archivist rule to ~/.codex/AGENTS.md");
+    } catch (err) {
+      log(`• could not write agent rules: ${err && err.message ? err.message : String(err)}`);
+    }
   }
 
   if (args.companion) {

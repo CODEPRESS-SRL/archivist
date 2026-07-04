@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `connect` now writes a short, managed "use Archivist" rule into detected
+  user-level agent rules files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`).
+  Idempotent; skip with `--no-rules`.
+
 ## 1.0.0 — 2026-07-04
 
 - Initial release of the archivist-companion Claude Code plugin.

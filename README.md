@@ -82,6 +82,11 @@ This verifies the token against the server, registers the MCP in Claude Code,
 auto-detects Codex/Cursor and wires them too, installs the companion plugin, and
 writes its config. Verify with `claude mcp list`.
 
+- Adds a short "use Archivist" rule to your user-level agent rules
+  (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) for each detected agent.
+  Pass `--no-rules` to skip it. The rule is a managed block, so re-running
+  updates it in place.
+
 <details><summary>Advanced / manual setup (per client)</summary>
 
 ### Claude Code

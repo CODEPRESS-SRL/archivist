@@ -205,6 +205,7 @@ function spyDeps(over = {}) {
       verify: rec("verify", Promise.resolve({ ok: true, team: "codepress", error: null })),
       registerClaudeMcp: rec("registerClaudeMcp", { ok: true, skipped: false, error: null }),
       writeAgentConfigs: rec("writeAgentConfigs", { codex: false, cursor: false }),
+      writeAgentRules: rec("writeAgentRules", { claude: false, codex: false }),
       installCompanion: rec("installCompanion", { ok: true, error: null }),
       writeCompanionConfig: rec("writeCompanionConfig", { path: "/home/u/.archivist-companion.json" }),
       log: () => {},
@@ -235,7 +236,7 @@ test("run: happy path calls all writers in order, returns 0", async () => {
   assert.equal(code, 0);
   const order = calls.map((c) => c.name);
   assert.deepEqual(order, [
-    "verify", "registerClaudeMcp", "writeAgentConfigs", "installCompanion", "writeCompanionConfig",
+    "verify", "registerClaudeMcp", "writeAgentConfigs", "writeAgentRules", "installCompanion", "writeCompanionConfig",
   ]);
 });
 
@@ -273,4 +274,35 @@ test("run: writeAgentConfigs throwing warns and continues (fail-soft)", async ()
   const names = calls.map((c) => c.name);
   assert.ok(names.includes("installCompanion"));
   assert.ok(names.includes("writeCompanionConfig"));
+});
+
+test("parseArgs: rules defaults true, --no-rules sets false", () => {
+  assert.equal(parseArgs(["--key", "arc_1"]).rules, true);
+  assert.equal(parseArgs(["--no-rules"]).rules, false);
+});
+
+test("run: happy path calls writeAgentRules after writeAgentConfigs", async () => {
+  const { calls, deps } = spyDeps();
+  deps.writeAgentRules = (...a) => { calls.push({ name: "writeAgentRules", a }); return { claude: true, codex: false }; };
+  const code = await run({ argv: ["--server", "https://x/mcp/", "--key", "arc_1"], deps });
+  assert.equal(code, 0);
+  const names = calls.map((c) => c.name);
+  assert.ok(names.includes("writeAgentRules"));
+  assert.ok(names.indexOf("writeAgentRules") > names.indexOf("writeAgentConfigs"));
+});
+
+test("run: --no-rules skips writeAgentRules", async () => {
+  const { calls, deps } = spyDeps();
+  deps.writeAgentRules = (...a) => { calls.push({ name: "writeAgentRules", a }); return { claude: false, codex: false }; };
+  const code = await run({ argv: ["--server", "https://x/mcp/", "--key", "arc_1", "--no-rules"], deps });
+  assert.equal(code, 0);
+  assert.ok(!calls.map((c) => c.name).includes("writeAgentRules"));
+});
+
+test("run: writeAgentRules throwing warns and continues (fail-soft)", async () => {
+  const { calls, deps } = spyDeps();
+  deps.writeAgentRules = () => { throw new Error("EACCES"); };
+  const code = await run({ argv: ["--server", "https://x/mcp/", "--key", "arc_1"], deps });
+  assert.equal(code, 0);
+  assert.ok(calls.map((c) => c.name).includes("installCompanion"));
 });
