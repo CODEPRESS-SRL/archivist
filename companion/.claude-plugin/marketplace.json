@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "archivist-companion",
-      "source": "./companion",
+      "source": ".",
       "description": "Session-end auto-capture, sweep, and session-start memory index for Archivist."
     }
   ]

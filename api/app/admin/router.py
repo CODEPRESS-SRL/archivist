@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from urllib.parse import quote
 
@@ -13,11 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin import auth as admin_auth
 from app.admin.auth import AdminSession, check_csrf, issue_csrf, require_session
 from app.admin.reads import duplicate_pairs, get_history, list_projects, stale_entries
+from app.admin.render import render_markdown
 from app.auth import hash_api_key, lookup_auth_context
 from app.config import get_settings
 from app.db import get_session
 from app.services.memory import ServiceError, compact_entry, delete_entry, get_entries, list_entries
-from app.services.search import search_memories
+from app.services.search_entry import run_search
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -98,17 +100,11 @@ async def dashboard(
 async def project_page(
     request: Request,
     slug: str,
-    q: str | None = None,
     msg: str | None = None,
     admin: AdminSession = Depends(require_session),
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     listing = await list_entries(session, admin.team_id, slug)
-    results = None
-    if q:
-        results = (await search_memories(session, admin.team_id, slug, q, scope="project"))[
-            "results"
-        ]
     return templates.TemplateResponse(
         request,
         "project.html",
@@ -116,9 +112,53 @@ async def project_page(
             "admin": admin,
             "slug": slug,
             "entries": listing["entries"],
-            "q": q,
-            "results": results,
             "msg": msg,
+        },
+    )
+
+
+@admin_router.get("/search", response_class=HTMLResponse)
+async def search_page(
+    request: Request,
+    q: str | None = None,
+    project: str | None = None,
+    scope: str = "project",
+    limit: int = 5,
+    admin: AdminSession = Depends(require_session),
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    if scope not in ("project", "all"):
+        scope = "project"
+    payload: dict | None = None
+    vector_rescued = False
+    msg: str | None = None
+    if q and scope == "project" and not (project or "").strip():
+        # Reachable global entry point (e.g. /admin/search?q=foo with no project) —
+        # normalize_keyword("") would raise; render an empty state instead of 500.
+        msg = 'Pick a project, or switch scope to "all", to search.'
+    elif q:
+        # scope="all" ignores project; scope="project" needs one.
+        target = project or ""
+        raw = await run_search(session, admin.team_id, target, q, limit=limit, scope=scope)
+        vector_rescued = bool(raw.pop("vector_rescued", False))
+        payload = raw  # exact agent-facing payload
+    search_mode = "hybrid" if get_settings().enable_hybrid_search else "lexical"
+    return templates.TemplateResponse(
+        request,
+        "search.html",
+        {
+            "admin": admin,
+            "q": q,
+            "project": project,
+            "scope": scope,
+            "limit": limit,
+            "msg": msg,
+            "payload": payload,
+            "payload_json": json.dumps(payload, indent=2, default=str)
+            if payload is not None
+            else "",
+            "search_mode": search_mode,
+            "vector_rescued": vector_rescued,
         },
     )
 
@@ -147,6 +187,8 @@ async def memory_page(
             "history": history,
             "csrf": issue_csrf(request),
             "msg": msg,
+            "content_html": render_markdown(entry["content"]),
+            "fragments_html": [render_markdown(f["content"]) for f in entry["fragments"]],
         },
     )
 

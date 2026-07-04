@@ -3,26 +3,20 @@
 <p><a href="/admin">&larr; projects</a></p>
 <h1>{{ slug }}</h1>
 
-<form method="get" action="/admin/projects/{{ slug }}">
-  <input type="search" name="q" value="{{ q or '' }}" placeholder="search…">
-  <button type="submit">Search</button>
+<form method="get" action="/admin/search" class="searchbar">
+  <input type="hidden" name="project" value="{{ slug }}">
+  <input type="search" name="q" value="{{ q or '' }}" placeholder="search this project…">
+  <button type="submit">Search (MCP preview)</button>
 </form>
-
-{% if results is not none %}
-  <h2>Search results</h2>
-  {% if not results %}<p>No matches.</p>{% endif %}
-  <ul>
-  {% for r in results %}
-    <li><a href="/admin/memory/{{ r.keyword }}?project={{ slug }}">{{ r.keyword }}</a>
-      — {{ r.excerpt }}</li>
-  {% endfor %}
-  </ul>
-{% endif %}
 
 <h2>Entries</h2>
 {% if not entries %}<p>No entries.</p>{% endif %}
-<table>
-  <thead><tr><th>Keyword</th><th>Tokens</th><th>Pending</th><th>Updated</th></tr></thead>
+<input type="search" id="entry-filter" placeholder="filter entries…" class="filter-box">
+<table id="entries">
+  <thead><tr>
+    <th>Keyword</th><th>Tokens</th>
+    <th>Pending</th><th>Updated</th>
+  </tr></thead>
   <tbody>
   {% for e in entries %}
     <tr>
@@ -35,4 +29,31 @@
   {% endfor %}
   </tbody>
 </table>
+<script>
+(function () {
+  var f = document.getElementById('entry-filter');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#entries tbody tr'));
+  if (f) f.addEventListener('input', function () {
+    var q = f.value.toLowerCase();
+    rows.forEach(function (r) {
+      r.style.display = r.textContent.toLowerCase().indexOf(q) > -1 ? '' : 'none';
+    });
+  });
+  document.querySelectorAll('#entries th').forEach(function (th, i) {
+    th.style.cursor = 'pointer';
+    var asc = true;
+    th.addEventListener('click', function () {
+      var body = document.querySelector('#entries tbody');
+      rows.sort(function (a, b) {
+        var x = a.children[i].textContent.trim(), y = b.children[i].textContent.trim();
+        var isNum = /^\d+(\.\d+)?$/;
+        var cmp = (isNum.test(x) && isNum.test(y)) ? parseFloat(x) - parseFloat(y) : x.localeCompare(y);
+        return asc ? cmp : -cmp;
+      });
+      asc = !asc;
+      rows.forEach(function (r) { body.appendChild(r); });
+    });
+  });
+})();
+</script>
 {% endblock %}

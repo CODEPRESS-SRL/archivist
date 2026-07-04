@@ -7,6 +7,23 @@ that a human would otherwise have to remember to do. Every component is
 **fail-silent**: if the Archivist server is down, the API key is missing, or
 `node` can't be found, the hook exits quietly and the session is unaffected.
 
+## One-command setup
+
+```bash
+npx archivist-connect --server https://<domain>/mcp/ --key arc_xxx
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--server <url>` | prompted | Archivist MCP endpoint |
+| `--key <arc_...>` | prompted | Team API key |
+| `--scope user\|project\|local` | `user` | Claude Code registration scope |
+| `--no-companion` | off | Register MCP only; skip companion install + config |
+| `--yes` | off | Non-interactive (CI): fail instead of prompting |
+
+It verifies the token first and writes nothing if verification fails. Re-running
+is safe (idempotent). The manual steps below remain available if you prefer them.
+
 ## What it does
 
 - **C1 — SessionEnd auto-capture.** At the end of a session, refines

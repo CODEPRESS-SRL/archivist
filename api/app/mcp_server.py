@@ -33,10 +33,9 @@ from app.config import get_settings
 from app.embeddings.base import get_embedder as _default_get_embedder
 from app.log import get_logger
 from app.services import dedup as dedup_svc
-from app.services import hybrid as hybrid_svc
 from app.services import memory as memory_svc
-from app.services import search as search_svc
 from app.services.memory import ServiceError
+from app.services.search_entry import run_search
 
 logger = get_logger()
 
@@ -228,11 +227,15 @@ def build_mcp() -> FastMCP:
 
         async def _do(session: AsyncSession) -> dict:
             team_id, _ = _team()
-            if hybrid_on:
-                return await hybrid_svc.hybrid_search(
-                    session, _get_embedder(), team_id, project, query, limit, scope
-                )
-            return await search_svc.search_memories(session, team_id, project, query, limit, scope)
+            return await run_search(
+                session,
+                team_id,
+                project,
+                query,
+                limit,
+                scope,
+                embedder_provider=_get_embedder,
+            )
 
         # ``intent`` is observational only: it never touches the query. An
         # unrecognized value is coerced to ``unspecified`` so a typo can never

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/admin">&larr; projects</a></p>
+<h1>MCP search preview</h1>
+<p class="muted">Runs the exact query path the AI agent uses via
+  <code>memory_search</code>. Mode:
+  <span class="badge mode">{{ search_mode }}</span>
+  {% if vector_rescued %}<span class="badge">vector-rescued</span>{% endif %}
+</p>
+
+<form method="get" action="/admin/search" class="searchbar">
+  <input type="search" name="q" value="{{ q or '' }}" placeholder="query…" autofocus>
+  {% if project %}<input type="hidden" name="project" value="{{ project }}">{% endif %}
+  <label>scope
+    <select name="scope">
+      <option value="project" {% if scope == 'project' %}selected{% endif %}>project</option>
+      <option value="all" {% if scope == 'all' %}selected{% endif %}>all</option>
+    </select>
+  </label>
+  <label>limit <input type="number" name="limit" min="1" max="50" value="{{ limit }}"></label>
+  <button type="submit">Search</button>
+</form>
+
+{% if msg %}<p class="muted">{{ msg }}</p>{% endif %}
+
+{% if payload is not none %}
+  <h2>Results ({{ payload.results|length }})</h2>
+  {% if not payload.results %}<p>No matches.</p>{% endif %}
+  {% for r in payload.results %}
+    <article class="result">
+      <h3><a href="/admin/memory/{{ r.keyword }}?project={{ r.project }}">{{ r.keyword }}</a>
+        <span class="proj">{{ r.project }}</span></h3>
+      <p class="excerpt">{{ r.excerpt }}</p>
+      <p class="meta">score {{ '%.3f'|format(r.score) }} ·
+        {{ r.token_count }} tokens · {{ r.pending_fragments }} pending ·
+        {{ r.age_days }}d old</p>
+    </article>
+  {% endfor %}
+
+  {% if payload.related_keywords %}
+    <h2>Related keywords</h2>
+    <p class="chips">
+    {% for rk in payload.related_keywords %}
+      <a class="chip" href="/admin/search?q={{ rk.keyword }}&project={{ rk.project }}&scope={{ scope }}">{{ rk.keyword }}</a>
+    {% endfor %}
+    </p>
+  {% endif %}
+
+  <h2>MCP payload</h2>
+  <details>
+    <summary>Raw JSON the agent receives</summary>
+    <script type="application/json" id="mcp-payload">{{ payload | tojson }}</script>
+    <pre class="content">{{ payload_json }}</pre>
+  </details>
+{% endif %}
+{% endblock %}

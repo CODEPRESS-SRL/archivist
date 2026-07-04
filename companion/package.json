@@ -1,9 +1,9 @@
 {
-  "name": "archivist-companion",
+  "name": "archivist-connect",
   "version": "1.0.0",
-  "description": "Optional Claude Code companion for the Archivist shared-memory MCP server: auto-capture, sweep, and session index.",
+  "description": "One-command setup (npx archivist-connect) plus the optional Claude Code companion (auto-capture, sweep, session index) for the Archivist shared-memory MCP server.",
   "type": "module",
-  "private": true,
+  "bin": { "archivist-connect": "./scripts/connect.js" },
   "scripts": {
     "test": "node --test"
   }

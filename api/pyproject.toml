@@ -17,6 +17,8 @@ dependencies = [
     "jinja2",
     "itsdangerous",
     "python-multipart",
+    "markdown",
+    "nh3",
 ]
 
 [dependency-groups]

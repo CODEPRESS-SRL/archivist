@@ -20,12 +20,12 @@
 </div>
 
 <h2>Content</h2>
-<pre class="content">{{ entry.content }}</pre>
+<div class="md-content">{{ content_html }}</div>
 
 <h2>Pending fragments</h2>
 {% if not entry.fragments %}<p>None.</p>{% endif %}
 {% for f in entry.fragments %}
-  <pre class="content">{{ f.content }}</pre>
+  <div class="md-content">{{ fragments_html[loop.index0] }}</div>
   <p class="muted">by {{ f.created_by }} · {{ f.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
 {% endfor %}
 

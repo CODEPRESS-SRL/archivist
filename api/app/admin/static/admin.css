@@ -14,7 +14,24 @@ a { color: var(--accent); }
 .badge { background: #fff3cd; padding: 0 .4rem; border-radius: 3px; font-size: .85em; }
 pre.content { white-space: pre-wrap; background: #fafafa; padding: .8rem;
   border: 1px solid var(--line); border-radius: 4px; }
+.md-content { background: #fafafa; border: 1px solid var(--line); border-radius: 4px;
+  padding: .2rem .9rem; }
+.md-content pre { background: #f0f0f0; padding: .6rem; border-radius: 4px; overflow-x: auto; }
 form.inline { display: inline; }
 button { cursor: pointer; }
 .logout button { background: none; border: 0; padding: 0; color: var(--accent);
   font: inherit; cursor: pointer; text-decoration: underline; }
+.searchbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+.searchbar input[type=search] { flex: 1; min-width: 12rem; padding: .35rem .5rem; }
+.result { border: 1px solid var(--line); border-radius: 6px; padding: .6rem .9rem; margin: .6rem 0; }
+.result h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.result .proj { color: var(--muted); font-weight: 400; font-size: .8em; margin-left: .5rem; }
+.result .excerpt { margin: .2rem 0; }
+.result .meta { color: var(--muted); font-size: .85em; margin: .2rem 0 0; }
+.chips { display: flex; gap: .4rem; flex-wrap: wrap; }
+.chip { background: #eef4fb; border: 1px solid var(--line); border-radius: 999px;
+  padding: .15rem .7rem; text-decoration: none; font-size: .85em; }
+.badge.mode { background: #e6f0fb; color: var(--accent); }
+.muted { color: var(--muted); }
+.filter-box { width: 100%; padding: .35rem .5rem; margin: .6rem 0; }
+#entries th { user-select: none; }

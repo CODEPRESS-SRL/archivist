@@ -144,6 +144,14 @@ See `tests/test_tenancy.py` (cross-team isolation: `get`/`create`/`append`/
 - **Writes**: only soft-delete and naïve compaction; both attributed as
   `admin:<owner_name>` in `memories.updated_by` / `memory_history`.
 
+### Admin console — markdown rendering
+
+Memory content is agent-written free text. The admin console renders it as
+markdown (`app/admin/render.py`), which is a stored-XSS surface. Mitigation:
+markdown output is sanitized with `nh3` against a conservative tag/attribute
+allow-list; raw HTML, `<script>`, event handlers, and non-`http(s)/mailto`
+URL schemes are stripped. Covered by `tests/test_admin_markdown.py`.
+
 ## Gap-closure S2/S4 (2026-07-04)
 
 Two new read surfaces were added on top of the existing keyword-embedding

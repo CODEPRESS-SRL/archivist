@@ -71,11 +71,18 @@ Read the full model in **[docs/concepts.md](docs/concepts.md)**.
 
 ## Quick start — connect your agent
 
-You need two things from your administrator: the server URL
-(`https://<domain>/mcp`) and a personal **API key** (a secret — treat it like a
-password). Then add the server to your MCP client. **That's the whole setup** —
-Archivist ships its usage protocol in the MCP handshake, so there's nothing else
-to configure.
+Your administrator gives you two things: the server URL (`https://<domain>/mcp/`)
+and a team **API key** (`arc_…`, a secret — treat it like a password). Then run:
+
+```bash
+npx archivist-connect --server https://<domain>/mcp/ --key arc_xxx
+```
+
+This verifies the token against the server, registers the MCP in Claude Code,
+auto-detects Codex/Cursor and wires them too, installs the companion plugin, and
+writes its config. Verify with `claude mcp list`.
+
+<details><summary>Advanced / manual setup (per client)</summary>
 
 ### Claude Code
 
@@ -117,6 +124,8 @@ Add to `~/.cursor/mcp.json` (or a project-local `.cursor/mcp.json`):
 
 That's it — start a session and your agent can `memory_search`,
 `memory_append`, and the rest. See the [tools reference](docs/mcp-tools.md).
+
+</details>
 
 ---
 

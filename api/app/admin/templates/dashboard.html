@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Projects</h1>
+<form method="get" action="/admin/search" class="searchbar">
+  <input type="search" name="q" placeholder="search all projects (what the agent sees)…">
+  <input type="hidden" name="scope" value="all">
+  <button type="submit">Search all</button>
+</form>
 <p>
   <a href="/admin/reports/stale">Stale report</a> ·
   <a href="/admin/reports/duplicates">Duplicate keywords</a>

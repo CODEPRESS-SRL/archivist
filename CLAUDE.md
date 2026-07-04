@@ -2,9 +2,10 @@
 
 > Entry point for Claude Code working in this repo. Product docs live in
 > [`docs/`](docs/): architecture ([docs/architecture.md](docs/architecture.md)),
-> the memory protocol ([docs/concepts.md](docs/concepts.md)), and the tool
-> contract ([docs/mcp-tools.md](docs/mcp-tools.md)). Contributor setup is in
-> [CONTRIBUTING.md](CONTRIBUTING.md).
+> the memory protocol ([docs/concepts.md](docs/concepts.md)), the tool
+> contract ([docs/mcp-tools.md](docs/mcp-tools.md)), and the agent-side
+> commands ([docs/agent-commands.md](docs/agent-commands.md)). Contributor
+> setup is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What Archivist is
 

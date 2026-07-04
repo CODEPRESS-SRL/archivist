@@ -58,6 +58,9 @@ async def test_project_search_filters(db_engine, seed_team) -> None:
     app = create_app()
     async with _client(app) as client:
         await _login(client, plaintext)
-        page = await client.get("/admin/projects/billing-api", params={"q": "caching"})
+        page = await client.get(
+            "/admin/search", params={"project": "billing-api", "q": "caching", "scope": "project"}
+        )
     assert page.status_code == 200
     assert "redis-cache" in page.text
+    assert "auth-flow" not in page.text

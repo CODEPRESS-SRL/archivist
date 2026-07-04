@@ -159,6 +159,10 @@ docker compose -f docker-compose.prod.yml exec api \
   python scripts/create_api_key.py key-issue --team <id|name> --label "<member/laptop>"
 ```
 
+Hand the developer just two values — the server URL and the issued key. They run
+`npx archivist-connect --server <url> --key <arc_...>` to wire up their agent in
+one step (see [agent commands](agent-commands.md)).
+
 List keys (and their team) to find an id to revoke:
 
 ```bash
