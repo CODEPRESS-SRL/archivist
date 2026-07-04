@@ -8,6 +8,7 @@ import { loadConfig } from "../lib/config.js";
 import { deriveSlug } from "../lib/slug.js";
 import { createClient } from "../lib/mcp-client.js";
 import { runSweep } from "../lib/sweep.js";
+import { finishSilently } from "../lib/finish.js";
 
 (async () => {
   try {
@@ -20,5 +21,8 @@ import { runSweep } from "../lib/sweep.js";
   } catch {
     // fail-silent
   }
-  process.exit(0);
+  // Drain instead of forcing exit: the mcp-client's undici socket is still
+  // closing here, and process.exit(0) would race it into a libuv crash on
+  // Windows (see lib/finish.js).
+  finishSilently();
 })();

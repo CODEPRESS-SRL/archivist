@@ -7,6 +7,7 @@ import { loadConfig, isConfigured } from "../lib/config.js";
 import { deriveSlug } from "../lib/slug.js";
 import { createClient } from "../lib/mcp-client.js";
 import { buildStartOutput } from "../lib/index-format.js";
+import { finishSilently } from "../lib/finish.js";
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -32,5 +33,8 @@ function readStdin() {
   } catch {
     // fail-silent — inject nothing
   }
-  process.exit(0);
+  // Drain instead of forcing exit: the mcp-client's undici socket is still
+  // closing here, and process.exit(0) would race it into a libuv crash on
+  // Windows (see lib/finish.js).
+  finishSilently();
 })();

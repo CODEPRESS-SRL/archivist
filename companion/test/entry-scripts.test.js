@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -54,3 +55,58 @@ test("session-start.js: malformed stdin, unconfigured — fail-silent, exit 0", 
   const res = run(SCRIPTS["session-start.js"], { input: "{ not json" });
   assert.equal(res.status, 0);
 });
+
+// A minimal FastMCP(stateless_http=True) stand-in: SSE `event: message` bodies
+// for id-bearing requests, 202 for notifications. Just enough for the client's
+// initialize -> notifications/initialized -> tools/call handshake to succeed so
+// the entry scripts open (and must cleanly tear down) a real undici socket.
+function startMockMcpServer() {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        let msg = {};
+        try {
+          msg = JSON.parse(body);
+        } catch {
+          /* ignore */
+        }
+        if (msg.id === undefined) {
+          res.writeHead(202).end(); // notification
+          return;
+        }
+        const result =
+          msg.method === "tools/call"
+            ? { structuredContent: { entries: [] } }
+            : { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "mock", version: "1" } };
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })}\n\n`);
+      });
+    });
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+// Regression: forcing process.exit(0) after an MCP call raced undici's socket
+// teardown into a libuv crash (exit 127) on Windows — the script produced its
+// output but the host saw a failed hook. These run the scripts configured
+// against a live server so the socket is actually opened; they must still exit 0.
+for (const name of ["session-start.js", "sweep-cli.js"]) {
+  test(`${name}: configured against a live MCP server exits 0 (no exit/undici race)`, async () => {
+    const server = await startMockMcpServer();
+    const { port } = server.address();
+    try {
+      const res = run(SCRIPTS[name], {
+        input: JSON.stringify({ source: "startup", cwd: process.cwd() }),
+        env: {
+          ARCHIVIST_SERVER_URL: `http://127.0.0.1:${port}/mcp/`,
+          ARCHIVIST_API_KEY: "test-key",
+        },
+      });
+      assert.equal(res.status, 0, `expected clean exit; stderr: ${res.stderr}`);
+    } finally {
+      server.close();
+    }
+  });
+}
