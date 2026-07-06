@@ -10,6 +10,7 @@ audit rows. Pure SQL, zero LLM (rule 2).
 from __future__ import annotations
 
 import pytest
+import tiktoken
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -57,6 +58,15 @@ async def _append(team_id: int, keyword: str, fragment: str = "a fragment") -> d
 async def _get(team_id: int, *keywords: str) -> dict:
     async with app_db.SessionFactory() as s:
         return await get_entries(s, team_id, PROJECT, list(keywords))
+
+
+def _content_with_tokens(n: int) -> str:
+    """Build content that encodes to exactly ``n`` cl100k_base tokens."""
+    enc = tiktoken.get_encoding("cl100k_base")
+    ids = enc.encode("word " * (n + 50))[:n]
+    text = enc.decode(ids)
+    assert count_tokens(text) == n  # guard against boundary drift
+    return text
 
 
 async def _history_versions(keyword: str) -> list[int]:
@@ -121,7 +131,7 @@ async def test_create_entry_duplicate_raises_already_exists(db_engine: object, t
 
 
 async def test_create_entry_over_cap_raises_entry_too_large(db_engine: object, team_id: int) -> None:
-    big = "word " * (_SETTINGS.entry_token_cap + 500)
+    big = _content_with_tokens(_SETTINGS.entry_token_hard_cap + 500)
     with pytest.raises(ServiceError) as exc:
         await _create(team_id, "too-big", big)
     assert exc.value.code == "ENTRY_TOO_LARGE"
@@ -135,10 +145,46 @@ async def test_create_existing_keyword_prefers_already_exists_over_too_large(
     # must be told ALREADY_EXISTS (→ memory_append), not ENTRY_TOO_LARGE: the
     # existence precondition is checked first (spec order).
     await _create(team_id, "redis-cache", "small")
-    big = "word " * (_SETTINGS.entry_token_cap + 500)
+    big = _content_with_tokens(_SETTINGS.entry_token_hard_cap + 500)
     with pytest.raises(ServiceError) as exc:
         await _create(team_id, "redis-cache", big)
     assert exc.value.code == "ALREADY_EXISTS"
+
+
+async def test_create_at_soft_cap_has_no_flag(db_engine: object, team_id: int) -> None:
+    content = _content_with_tokens(_SETTINGS.entry_token_cap)  # exactly 2000
+    result = await _create(team_id, "at-soft", content)
+    assert result["token_count"] == _SETTINGS.entry_token_cap
+    assert "soft_cap_exceeded" not in result
+    assert "warning" not in result
+
+
+async def test_create_over_soft_cap_is_accepted_and_flagged(
+    db_engine: object, team_id: int
+) -> None:
+    content = _content_with_tokens(3000)  # 2000 < 3000 < 10000
+    result = await _create(team_id, "over-soft", content)
+    assert result["created"] is True
+    assert result["token_count"] == 3000
+    assert result["soft_cap_exceeded"] is True
+    assert "3000" in result["warning"]
+
+
+async def test_create_at_hard_cap_is_accepted(db_engine: object, team_id: int) -> None:
+    content = _content_with_tokens(_SETTINGS.entry_token_hard_cap)  # exactly 10000
+    result = await _create(team_id, "at-hard", content)
+    assert result["created"] is True
+    assert result["soft_cap_exceeded"] is True
+
+
+async def test_create_over_hard_cap_raises_entry_too_large(
+    db_engine: object, team_id: int
+) -> None:
+    content = _content_with_tokens(_SETTINGS.entry_token_hard_cap + 1)  # 10001
+    with pytest.raises(ServiceError) as exc:
+        await _create(team_id, "over-hard", content)
+    assert exc.value.code == "ENTRY_TOO_LARGE"
+    assert str(count_tokens(content)) in exc.value.message
 
 
 # --- append_fragment -------------------------------------------------------
@@ -308,11 +354,34 @@ async def test_compact_missing_entry_not_found(db_engine: object, team_id: int) 
 
 async def test_compact_over_cap_entry_too_large(db_engine: object, team_id: int) -> None:
     await _create(team_id, "redis-cache", "base")
-    big = "word " * (_SETTINGS.entry_token_cap + 500)
+    big = _content_with_tokens(_SETTINGS.entry_token_hard_cap + 500)
     with pytest.raises(ServiceError) as exc:
         async with app_db.SessionFactory() as s:
             await compact_entry(s, team_id, PROJECT, "redis-cache", big, 1, None, OWNER)
     assert exc.value.code == "ENTRY_TOO_LARGE"
+
+
+async def test_compact_over_soft_cap_is_accepted_and_flagged(
+    db_engine: object, team_id: int
+) -> None:
+    await _create(team_id, "redis-cache", "base")
+    f1 = (await _append(team_id, "redis-cache", "frag"))["fragment_id"]
+    merged = _content_with_tokens(3000)
+    async with app_db.SessionFactory() as s:
+        result = await compact_entry(s, team_id, PROJECT, "redis-cache", merged, 1, f1, OWNER)
+    assert result["version"] == 2
+    assert result["fragments_consumed"] == 1
+    assert result["soft_cap_exceeded"] is True
+    assert "3000" in result["warning"]
+
+
+async def test_compact_at_soft_cap_has_no_flag(db_engine: object, team_id: int) -> None:
+    await _create(team_id, "redis-cache", "base")
+    merged = _content_with_tokens(_SETTINGS.entry_token_cap)  # exactly 2000
+    async with app_db.SessionFactory() as s:
+        result = await compact_entry(s, team_id, PROJECT, "redis-cache", merged, 1, None, OWNER)
+    assert result["version"] == 2
+    assert "soft_cap_exceeded" not in result
 
 
 async def test_rule4_late_append_survives_compact(db_engine: object, team_id: int) -> None:

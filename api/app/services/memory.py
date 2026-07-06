@@ -82,6 +82,15 @@ def _compaction_due(pending: int, token_total: int) -> bool:
     )
 
 
+def _soft_cap_fields(tokens: int) -> dict:
+    """Return the soft-cap flag + warning when a write is over the soft cap but
+    within the hard cap; empty dict otherwise. The hard-cap rejection is handled
+    by the caller before this runs."""
+    if tokens > get_settings().entry_token_cap:
+        return {"soft_cap_exceeded": True, "warning": errors.soft_cap_warning(tokens)}
+    return {}
+
+
 async def _project_id(session: AsyncSession, team_id: int, slug: str) -> int | None:
     return (
         await session.execute(
@@ -160,7 +169,7 @@ async def create_entry(
         raise _already_exists(keyword)
 
     tokens = count_tokens(content)
-    if tokens > get_settings().entry_token_cap:
+    if tokens > get_settings().entry_token_hard_cap:
         raise _entry_too_large(tokens)
 
     if project_id is None:
@@ -205,7 +214,13 @@ async def create_entry(
         MemoryHistory(memory_id=memory.id, version=1, content=content, updated_by=updated_by)
     )
     await session.commit()
-    return {"keyword": keyword, "created": True, "version": 1, "token_count": tokens}
+    return {
+        "keyword": keyword,
+        "created": True,
+        "version": 1,
+        "token_count": tokens,
+        **_soft_cap_fields(tokens),
+    }
 
 
 async def append_fragment(
@@ -310,7 +325,7 @@ async def compact_entry(
         raise _version_conflict(expected_version, current)
 
     tokens = count_tokens(content)
-    if tokens > get_settings().entry_token_cap:
+    if tokens > get_settings().entry_token_hard_cap:
         await session.rollback()
         raise _entry_too_large(tokens)
 
@@ -346,6 +361,7 @@ async def compact_entry(
         "version": expected_version + 1,
         "token_count": tokens,
         "fragments_consumed": consumed,
+        **_soft_cap_fields(tokens),
     }
 
 

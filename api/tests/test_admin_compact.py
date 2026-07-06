@@ -88,8 +88,9 @@ async def test_compact_over_cap_surfaces_error(db_engine, seed_team, monkeypatch
         await memory_svc.append_fragment(
             session, team_id, "billing-api", "redis-cache", "extra", "agent"
         )
-    # shrink the cap so the merged content is over-cap
-    monkeypatch.setattr(get_settings(), "entry_token_cap", 1)
+    # shrink the hard cap so the merged content is over-cap (rejection now
+    # only happens above the hard cap, not the soft cap)
+    monkeypatch.setattr(get_settings(), "entry_token_hard_cap", 1)
     app = create_app()
     async with _client(app) as client:
         await _login(client, plaintext)

@@ -38,7 +38,7 @@ _BASE = "http://arc.test"
 _MCP_URL = f"{_BASE}/mcp"
 
 # Oversized payloads for the token-cap errors (cl100k_base ≈ one token per word).
-_HUGE_CONTENT = "alpha " * 3000  # > 2000 tokens
+_HUGE_CONTENT = "alpha " * 15000  # > 10000 tokens (hard cap)
 _HUGE_FRAGMENT = "beta " * 800  # > 500 tokens
 
 
