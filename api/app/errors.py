@@ -54,8 +54,21 @@ def already_exists(keyword: str) -> str:
 
 def entry_too_large(tokens: int) -> str:
     return (
-        f"Content is {tokens} tokens; the cap is 2000. Compress it further, or "
-        "split the concept into two keywords."
+        f"Content is {tokens} tokens; the hard cap is 10000. Split the concept "
+        "into multiple keywords."
+    )
+
+
+def soft_cap_warning(tokens: int) -> str:
+    """Non-fatal notice on the success payload when an entry is over the 2000
+    soft cap but within the 10000 hard cap. The write already succeeded; this
+    only nudges the agent to re-refine if it can compress without losing data."""
+    return (
+        f"Entry is {tokens} tokens, over the 2000 soft cap (accepted). If it "
+        "can be compressed without losing information, re-refine ~10% smaller "
+        "and memory_upsert again; repeat while it keeps shrinking. Stop when a "
+        "pass removes <5%, when you drop under 2000, or when nothing more can "
+        "go without losing data — then keep it as-is."
     )
 
 

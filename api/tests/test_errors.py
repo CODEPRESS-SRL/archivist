@@ -46,9 +46,9 @@ _CASES: list[tuple[str, str, str]] = [
     ),
     (
         errors.ENTRY_TOO_LARGE,
-        errors.entry_too_large(2500),
-        "Content is 2500 tokens; the cap is 2000. Compress it further, or split "
-        "the concept into two keywords.",
+        errors.entry_too_large(11000),
+        "Content is 11000 tokens; the hard cap is 10000. Split the concept "
+        "into multiple keywords.",
     ),
     (
         errors.FRAGMENT_TOO_LARGE,
@@ -87,6 +87,17 @@ def test_message_matches_appendix_c(code: str, message: str, canonical: str) -> 
 @pytest.mark.parametrize(("code", "message", "canonical"), _CASES, ids=_IDS)
 def test_message_carries_operational_instruction(code: str, message: str, canonical: str) -> None:
     assert _INSTRUCTION.search(message), message
+
+
+def test_soft_cap_warning_is_actionable() -> None:
+    from app import errors
+
+    msg = errors.soft_cap_warning(3000)
+    assert "3000" in msg
+    assert "2000" in msg  # names the soft cap
+    assert "10%" in msg  # the re-refine step
+    # ends in an actionable stop condition (rule 7)
+    assert "without losing" in msg
 
 
 def test_validation_pending_fragments_has_instruction() -> None:
