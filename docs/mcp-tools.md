@@ -99,7 +99,10 @@ Create a new entry, **or** write a compaction result. The presence of
 
 - `project` (str)
 - `keyword` (str)
-- `content` (str) — refined content, ≤ 2000 tokens.
+- `content` (str) — refined content. 2000-token **soft cap**: over it the write
+  still succeeds but the response carries `soft_cap_exceeded: true` and a
+  `warning`. 10000-token **hard cap**: over it the write is rejected
+  (`ENTRY_TOO_LARGE`).
 - `expected_version` (int, optional) — **omit to create** (entry is created at
   version 1); **pass to compact** (must match the current version).
 - `last_fragment_id` (int, optional) — on a compaction, the id up to which
@@ -112,10 +115,12 @@ project whose keyword embedding is close to this one (each with `keyword`,
 `similarity`, `preview`). It is advisory only — never a rejection — and is
 omitted when there's no close match or the embedder is unavailable. If one of
 them is really the same concept, self-correct: `memory_delete` the entry just
-created and `memory_append` a fragment to the existing keyword instead.
+created and `memory_append` a fragment to the existing keyword instead. When the
+content is over the 2000-token soft cap (but under the 10000 hard cap), the
+response includes `soft_cap_exceeded: true` (bool) and `warning` (str).
 
 **Errors** — `ALREADY_EXISTS` (created a keyword that already exists — read +
-append, or compact); `ENTRY_TOO_LARGE` (> 2000 tokens — compress or split);
+append, or compact); `ENTRY_TOO_LARGE` (> 10000 tokens — split the concept);
 `VERSION_CONFLICT` (someone compacted first — re-read, merge, retry);
 `VALIDATION_ERROR` (compaction omitted `last_fragment_id` while fragments were
 pending).
@@ -156,7 +161,7 @@ structured envelope whose message tells the agent what to do next:
 | `RATE_LIMITED` | > 120 req/min per key — wait a few seconds and retry. |
 | `NOT_FOUND` | Keyword absent in the project — create it with `memory_upsert`. |
 | `ALREADY_EXISTS` | Created a keyword that exists — read + `memory_append`, or compact. |
-| `ENTRY_TOO_LARGE` | Content > 2000 tokens — compress or split the concept. |
+| `ENTRY_TOO_LARGE` | Content > 10000 tokens (hard cap) — split the concept across keywords. Over the 2000 soft cap is accepted with a `soft_cap_exceeded` warning, not this error. |
 | `FRAGMENT_TOO_LARGE` | Fragment > 500 tokens — refine down to essentials. |
 | `TOO_MANY_FRAGMENTS` | 10 pending fragments — compact first (backpressure). |
 | `VERSION_CONFLICT` | Compaction lost the race — re-read, merge, retry. |
