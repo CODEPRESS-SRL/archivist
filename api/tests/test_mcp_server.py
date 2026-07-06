@@ -417,6 +417,19 @@ async def test_compact_without_last_fragment_id_is_rejected(db_engine: object) -
     assert payload["error"]["code"] == "VALIDATION_ERROR"
 
 
+async def test_memory_upsert_surfaces_soft_cap_warning(db_engine: object) -> None:
+    app = create_app()
+    token = await _new_key()
+    over_soft = "alpha " * 3000  # > 2000 soft cap, < 10000 hard cap
+    async with _client_session(app, token) as session:
+        result = await _call(
+            session, "memory_upsert", project="p", keyword="verbose", content=over_soft
+        )
+    assert result["soft_cap_exceeded"] is True
+    assert "warning" in result and "2000" in result["warning"]
+    assert "error" not in result  # it was accepted, not rejected
+
+
 # --- server instructions (the write/retrieve protocol, T2.1) ---------------
 
 

@@ -82,8 +82,9 @@ WRITE (save a concept).
 1. Extract 1-3 keywords from the concept.
 2. Keyword you know exists → refine a dense fragment ≤500 tokens and \
 `memory_append` it. Never blocks, never conflicts.
-3. New concept → write a self-contained mini-context ≤2000 tokens and \
-`memory_upsert` it (omit `expected_version`). If the response lists \
+3. New concept → write a mini-context (2000 soft / 10000 hard; over soft: \
+`soft_cap_exceeded`, re-refine smaller) and `memory_upsert` it (omit \
+`expected_version`). If the response lists \
 `near_duplicates` and one is the same concept, self-correct now: \
 `memory_delete` your new entry and `memory_append` a fragment to the existing \
 keyword. Unsure whether a keyword exists? Probe first with `memory_search` \
@@ -102,7 +103,7 @@ correction fragment (`memory_append`).
 COMPACTION (routine upkeep). When any response shows `compaction_due=true`, \
 compact in the same turn if you can — no user permission needed; it is safe, \
 every version is kept in history. Steps: `memory_get` the keyword, merge base + \
-fragments into one refined content ≤2000 tokens, `memory_upsert` with the \
+fragments into refined content (cap as WRITE), `memory_upsert` with the \
 `expected_version` and `last_fragment_id` you read. `VERSION_CONFLICT` → someone \
 compacted first: re-read, retry. Mid-task and cannot stop? Deferring is safe — \
 every version is kept and the append queue is bounded — and if the team has the \
@@ -310,7 +311,11 @@ def build_mcp() -> FastMCP:
             "On create, the response may include near_duplicates (existing keywords "
             "that look like the same concept): if one matches, self-correct — "
             "memory_delete your new entry and memory_append a fragment to the "
-            "existing keyword."
+            "existing keyword. "
+            "Content has a 2000-token soft cap and a 10000-token hard cap: over "
+            "2000 the write still succeeds but returns soft_cap_exceeded + a "
+            "warning — re-refine ~10% smaller and upsert again while it keeps "
+            "compressing without losing data; over 10000 it is rejected."
         )
     )
     async def memory_upsert(
