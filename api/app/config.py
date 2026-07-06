@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://archivist:archivist@localhost:5432/archivist"
 
     # Token caps
-    entry_token_cap: int = 2000
+    entry_token_cap: int = 2000  # SOFT cap — over this the write is flagged, not rejected
+    entry_token_hard_cap: int = 10000  # HARD cap — writes above this are rejected
     fragment_token_cap: int = 500
 
     # Compaction thresholds

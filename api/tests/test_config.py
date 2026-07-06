@@ -45,3 +45,12 @@ def test_forwarded_allow_ips_read_from_env(monkeypatch) -> None:
     get_settings.cache_clear()
     assert get_settings().forwarded_allow_ips == "203.0.113.7"
     get_settings.cache_clear()
+
+
+def test_entry_token_hard_cap_default() -> None:
+    from app.config import Settings
+
+    settings = Settings()
+    assert settings.entry_token_cap == 2000  # soft cap unchanged
+    assert settings.entry_token_hard_cap == 10000  # new hard cap
+    assert settings.entry_token_hard_cap > settings.entry_token_cap
