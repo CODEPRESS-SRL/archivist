@@ -324,6 +324,25 @@ async def compact_entry(
         await session.rollback()
         raise _version_conflict(expected_version, current)
 
+    if content == memory.content:
+        # No-op compaction: the re-refined value is byte-identical to the stored
+        # base (e.g. an irreducible over-soft entry that keeps reporting
+        # compaction_due=true). Bumping the version and writing a memory_history
+        # row here would churn history without changing anything, so skip the
+        # write. Capture the token count before rollback expires the instance,
+        # release the FOR UPDATE lock, and report the unchanged state.
+        tokens = memory.token_count
+        await session.rollback()
+        return {
+            "keyword": keyword,
+            "created": False,
+            "unchanged": True,
+            "version": expected_version,
+            "token_count": tokens,
+            "fragments_consumed": 0,
+            **_soft_cap_fields(tokens),
+        }
+
     tokens = count_tokens(content)
     if tokens > get_settings().entry_token_hard_cap:
         await session.rollback()

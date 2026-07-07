@@ -384,6 +384,23 @@ async def test_compact_at_soft_cap_has_no_flag(db_engine: object, team_id: int) 
     assert "soft_cap_exceeded" not in result
 
 
+async def test_compact_unchanged_content_is_noop(db_engine: object, team_id: int) -> None:
+    # An irreducible over-soft entry re-refines to byte-identical content: the
+    # compaction must be a no-op — no version bump, no memory_history row — so
+    # the reader that keeps seeing compaction_due=true does not churn history.
+    await _create(team_id, "redis-cache", "base content")
+    base = (await _get(team_id, "redis-cache"))["entries"][0]["content"]
+    async with app_db.SessionFactory() as s:
+        result = await compact_entry(s, team_id, PROJECT, "redis-cache", base, 1, None, OWNER)
+    assert result["unchanged"] is True
+    assert result["version"] == 1
+    assert result["fragments_consumed"] == 0
+    after = (await _get(team_id, "redis-cache"))["entries"][0]
+    assert after["version"] == 1
+    assert after["content"] == base
+    assert await _history_versions("redis-cache") == [1]  # no v2 churn row
+
+
 async def test_rule4_late_append_survives_compact(db_engine: object, team_id: int) -> None:
     # Fragment that lands AFTER the read but BEFORE the compact must survive.
     await _create(team_id, "redis-cache", "base")

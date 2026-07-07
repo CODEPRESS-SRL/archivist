@@ -119,7 +119,10 @@ omitted when there's no close match or the embedder is unavailable. If one of
 them is really the same concept, self-correct: `memory_delete` the entry just
 created and `memory_append` a fragment to the existing keyword instead. When the
 content is over the 2000-token soft cap (but under the 10000 hard cap), the
-response includes `soft_cap_exceeded: true` (bool) and `warning` (str).
+response includes `soft_cap_exceeded: true` (bool) and `warning` (str). On a
+compaction whose refined `content` is byte-identical to the stored base (e.g. an
+irreducible over-soft entry), the write is skipped: the response carries
+`unchanged: true` and the `version` is unchanged (no history row is written).
 
 **Errors** — `ALREADY_EXISTS` (created a keyword that already exists — read +
 append, or compact); `ENTRY_TOO_LARGE` (> 10000 tokens — split the concept);
