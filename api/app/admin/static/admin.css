@@ -1,37 +1,139 @@
-:root { --fg: #1c1c1c; --muted: #666; --line: #e2e2e2; --accent: #2b6cb0; }
+/* Archivist Admin — "Schedario" theme (archival card-catalog).
+   Pure CSS, no external fonts or libraries. Class names match the Jinja
+   templates 1:1; only presentation changes here. */
+:root {
+  --paper:      #f4efe4;  /* page ground */
+  --panel:      #efe7d6;  /* topbar / raised strips */
+  --card:       #fbf8f1;  /* parchment cards, code, inputs */
+  --ink:        #26221a;  /* text + strong rules */
+  --muted:      #6b6252;  /* captions, metadata */
+  --line:       #e2d8c2;  /* hairline row rules */
+  --line-strong:#c8bda4;  /* input borders, header rules */
+  --accent:     #8c3b2e;  /* oxblood — links, keywords, emphasis */
+  --brass:      #8c6a2e;  /* numerals, secondary accent */
+  --serif: "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --mono: ui-monospace,Menlo,Consolas,"SFMono-Regular",monospace;
+}
 * { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: var(--fg); }
-.topbar { display: flex; justify-content: space-between; align-items: center;
-  padding: .7rem 1.2rem; border-bottom: 1px solid var(--line); }
-.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
-.topbar .team { color: var(--muted); margin-right: 1rem; }
-main { max-width: 900px; margin: 1.5rem auto; padding: 0 1.2rem; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
-a { color: var(--accent); }
-.flash { background: #edf7ed; padding: .5rem .8rem; border-radius: 4px; }
-.error { color: #b00020; }
-.badge { background: #fff3cd; padding: 0 .4rem; border-radius: 3px; font-size: .85em; }
-pre.content { white-space: pre-wrap; background: #fafafa; padding: .8rem;
-  border: 1px solid var(--line); border-radius: 4px; }
-.md-content { background: #fafafa; border: 1px solid var(--line); border-radius: 4px;
-  padding: .2rem .9rem; }
-.md-content pre { background: #f0f0f0; padding: .6rem; border-radius: 4px; overflow-x: auto; }
+
+body {
+  margin: 0;
+  font: 15px/1.6 var(--serif);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Topbar ------------------------------------------------------------- */
+.topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .8rem 1.4rem;
+  background: var(--panel);
+  border-bottom: 2px solid var(--ink);
+}
+.brand {
+  font-weight: 700; font-size: 1.05rem; letter-spacing: .01em;
+  text-decoration: none; color: var(--ink);
+}
+.topbar nav { display: flex; align-items: center; gap: .8rem; }
+.topbar .team {
+  color: var(--muted); font: .72rem/1 var(--mono);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+
+/* ---- Layout & headings -------------------------------------------------- */
+main { max-width: 900px; margin: 1.6rem auto; padding: 0 1.4rem; }
+h1 { font-weight: 600; font-size: 1.9rem; letter-spacing: -.01em; margin: .2rem 0 .6rem; }
+h2 {
+  font-weight: 600; font-size: 1.2rem; margin: 1.6rem 0 .5rem;
+  padding-bottom: .25rem; border-bottom: 1px solid var(--line-strong);
+}
+
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid #d8b8a8; }
+a:hover { border-bottom-color: var(--accent); }
+.brand, .topbar .team, .chip, a.badge { border-bottom: 0; }
+
+/* ---- Tables ------------------------------------------------------------- */
+table { width: 100%; border-collapse: collapse; border-top: 1px solid var(--ink); }
+th, td { text-align: left; padding: .55rem .65rem; }
+th {
+  font: .66rem/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); border-bottom: 1px solid var(--line-strong); padding-top: .7rem;
+}
+td { border-bottom: 1px solid var(--line); }
+tbody tr:hover { background: rgba(140,59,46,.04); }
+
+/* ---- Forms & buttons ---------------------------------------------------- */
+label { display: inline-block; }
+input[type=search], input[type=password], input[type=number], select, .filter-box {
+  background: var(--card); border: 1px solid var(--line-strong); border-radius: 2px;
+  padding: .45rem .6rem; font: inherit; color: var(--ink);
+}
+input:focus, select:focus, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+button {
+  cursor: pointer; background: var(--ink); color: var(--paper);
+  border: 1px solid var(--ink); border-radius: 2px;
+  padding: .45rem 1rem; font: 600 .85rem/1 var(--serif); letter-spacing: .02em;
+}
+button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+button:disabled { background: var(--panel); color: var(--muted); border-color: var(--line-strong); cursor: not-allowed; }
+
+/* logout renders as an inline text link, not a filled button */
+.logout button {
+  background: none; border: 0; padding: 0; color: var(--accent);
+  font: inherit; text-decoration: underline; letter-spacing: 0;
+}
+.logout button:hover { background: none; color: var(--ink); }
+
 form.inline { display: inline; }
-button { cursor: pointer; }
-.logout button { background: none; border: 0; padding: 0; color: var(--accent);
-  font: inherit; cursor: pointer; text-decoration: underline; }
-.searchbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
-.searchbar input[type=search] { flex: 1; min-width: 12rem; padding: .35rem .5rem; }
-.result { border: 1px solid var(--line); border-radius: 6px; padding: .6rem .9rem; margin: .6rem 0; }
-.result h3 { margin: 0 0 .3rem; font-size: 1rem; }
-.result .proj { color: var(--muted); font-weight: 400; font-size: .8em; margin-left: .5rem; }
-.result .excerpt { margin: .2rem 0; }
-.result .meta { color: var(--muted); font-size: .85em; margin: .2rem 0 0; }
-.chips { display: flex; gap: .4rem; flex-wrap: wrap; }
-.chip { background: #eef4fb; border: 1px solid var(--line); border-radius: 999px;
-  padding: .15rem .7rem; text-decoration: none; font-size: .85em; }
-.badge.mode { background: #e6f0fb; color: var(--accent); }
-.muted { color: var(--muted); }
-.filter-box { width: 100%; padding: .35rem .5rem; margin: .6rem 0; }
+.actions { display: flex; gap: .6rem; margin: .8rem 0; }
+.searchbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1.1rem 0; }
+.searchbar input[type=search] { flex: 1; min-width: 12rem; }
+.filter-box { width: 100%; margin: .6rem 0; }
 #entries th { user-select: none; }
+
+/* ---- Notices ------------------------------------------------------------ */
+.flash {
+  background: var(--card); border-left: 3px solid var(--brass);
+  padding: .5rem .9rem; border-radius: 0 3px 3px 0;
+}
+.error { color: var(--accent); font-weight: 600; }
+.badge {
+  background: var(--panel); border: 1px solid var(--line-strong);
+  padding: 0 .45rem; border-radius: 2px; font: .78rem/1.5 var(--mono);
+  color: var(--brass);
+}
+.badge.mode { background: #f0e3dc; color: var(--accent); border-color: #d8b8a8; }
+.muted { color: var(--muted); }
+
+/* ---- Content blocks (code / rendered markdown) -------------------------- */
+pre.content {
+  white-space: pre-wrap; background: var(--card); padding: .8rem;
+  border: 1px solid var(--line-strong); border-radius: 3px;
+}
+.md-content {
+  background: var(--card); border: 1px solid var(--line-strong); border-radius: 3px;
+  padding: .2rem .9rem;
+}
+.md-content pre { background: #f0e9da; padding: .6rem; border-radius: 3px; overflow-x: auto; }
+
+/* ---- Search results ----------------------------------------------------- */
+.result {
+  background: var(--card); border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent); border-radius: 0 4px 4px 0;
+  padding: .6rem .9rem; margin: .7rem 0;
+}
+.result h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
+.result h3 a { border-bottom: 0; }
+.result .proj { color: var(--muted); font: .78rem/1 var(--mono); margin-left: .5rem; }
+.result .excerpt { margin: .2rem 0; }
+.result .meta { color: var(--muted); font: .78rem/1.5 var(--mono); margin: .3rem 0 0; }
+
+.chips { display: flex; gap: .4rem; flex-wrap: wrap; }
+.chip {
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: 2px;
+  padding: .15rem .65rem; text-decoration: none; font-size: .8rem; color: var(--ink);
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
