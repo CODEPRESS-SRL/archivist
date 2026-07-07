@@ -190,6 +190,37 @@ async def test_full_cycle_search_upsert_append_get_compact(
         assert found["results"][0]["project"] == project
 
 
+# --- memory_get accepts a single keyword or a list ------------------------
+
+
+async def test_memory_get_accepts_a_bare_string_keyword(
+    db_engine: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Agents frequently pass a single keyword as a scalar instead of a
+    # one-element list. memory_get must accept ``keywords="k"`` as well as
+    # ``keywords=["k"]`` so the common shape is never a malformed call.
+    from app import mcp_server
+    from tests.fakes import FakeEmbedder
+
+    monkeypatch.setattr(mcp_server, "_get_embedder", lambda: FakeEmbedder())
+
+    app = create_app()
+    token = await _new_key()
+    project, keyword = "archivist", "design-system"
+
+    async with _client_session(app, token) as session:
+        await _call(session, "memory_upsert", project=project, keyword=keyword, content="base")
+
+        # bare string ...
+        by_string = await _call(session, "memory_get", project=project, keywords=keyword)
+        # ... and one-element list resolve to the same entry
+        by_list = await _call(session, "memory_get", project=project, keywords=[keyword])
+
+        assert by_string["entries"][0]["keyword"] == keyword
+        assert by_string["not_found"] == []
+        assert by_string == by_list
+
+
 # --- cross-project scope ---------------------------------------------------
 
 

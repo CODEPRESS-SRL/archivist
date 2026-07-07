@@ -56,7 +56,9 @@ Read entries by keyword.
 **Parameters**
 
 - `project` (str)
-- `keywords` (list[str]) — one or more keywords to read.
+- `keywords` (str | list[str]) — one or more keywords to read. A single
+  keyword may be passed as a bare string (`"design-system"`) or a list
+  (`["design-system"]`); both are accepted.
 
 **Returns** — for each found keyword: base `content`, pending `fragments`,
 `fragment_count`, `version`, `last_fragment_id`, `compaction_due`,

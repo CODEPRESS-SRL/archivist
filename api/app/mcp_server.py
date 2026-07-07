@@ -272,15 +272,21 @@ def build_mcp() -> FastMCP:
             "fragment_count. Unknown keywords "
             "come back in not_found. If compaction_due is true, COMPACT NOW: merge "
             "the base and all fragments into one refined content and call "
-            "memory_upsert with the returned expected_version and last_fragment_id."
+            "memory_upsert with the returned expected_version and last_fragment_id. "
+            'keywords takes a list, e.g. keywords=["design-system"]; a single '
+            'keyword may also be passed as a bare string, e.g. keywords="design-system".'
         )
     )
-    async def memory_get(project: str, keywords: list[str]) -> dict:
+    async def memory_get(project: str, keywords: str | list[str]) -> dict:
+        # Agents routinely pass a single keyword as a scalar. Accept both shapes
+        # so the common case is never a malformed call; normalize to a list here.
+        kw_list = [keywords] if isinstance(keywords, str) else list(keywords)
+
         async def _do(session: AsyncSession) -> dict:
             team_id, _ = _team()
-            return await memory_svc.get_entries(session, team_id, project, keywords)
+            return await memory_svc.get_entries(session, team_id, project, kw_list)
 
-        return await _run("memory_get", _do, project=project, keyword=",".join(keywords))
+        return await _run("memory_get", _do, project=project, keyword=",".join(kw_list))
 
     @mcp.tool(
         description=(
