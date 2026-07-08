@@ -74,11 +74,16 @@ def _version_conflict(expected: int, current: int) -> ServiceError:
 
 
 def _compaction_due(pending: int, token_total: int) -> bool:
-    """Single shared rule: many fragments OR the merged size nearing the cap."""
+    """Single shared rule: many fragments OR the merged size over the target.
+
+    The 8k target (not the 2k soft cap) is the sweep trigger: entries in the
+    2k-8k band are an acceptable size and are not swept for size alone. The soft
+    cap only drives the write-time ``soft_cap_exceeded`` warning.
+    """
     settings = get_settings()
     return (
         pending > settings.compaction_fragment_threshold
-        or token_total > settings.entry_token_cap * settings.compaction_token_ratio
+        or token_total > settings.entry_token_target
     )
 
 

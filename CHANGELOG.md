@@ -4,6 +4,25 @@ All notable changes to Archivist are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Three-tier entry size model.** The compaction/sweep trigger is decoupled
+  from the 2 000-token soft cap. An entry is now flagged `compaction_due` (and
+  swept by the companion) only when it exceeds the new **8 000-token target**
+  (`ENTRY_TOKEN_TARGET`) or accumulates more than `COMPACTION_FRAGMENT_THRESHOLD`
+  fragments. The 2 000-token soft cap still emits the `soft_cap_exceeded` write
+  warning; the 10 000-token hard cap still rejects. Entries in the 2k–8k band
+  are an acceptable size and no longer churn as perpetually `compaction_due`.
+  The companion merge/refine prompt compresses toward ~2 000 tokens with the
+  8 000 ceiling, exceeded only for genuinely irreducible content.
+
+### Removed
+
+- **`COMPACTION_TOKEN_RATIO`** setting (was `0.66`), superseded by the explicit
+  `ENTRY_TOKEN_TARGET`.
+
 ## [1.1.0] — 2026-07-04
 
 Gap-closure pass on the v1 MVP: hybrid search graduates to the default, and

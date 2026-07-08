@@ -50,9 +50,11 @@ main tunables:
 | `ADMIN_SESSION_SECRET` | — (mandatory in prod) | Signs `/admin` session cookies; a stable value keeps sessions valid across restarts. |
 | `ARCHIVIST_DOMAIN` | `archivist.example.com` | FQDN Caddy issues the cert for (Option A). |
 | `FORWARDED_ALLOW_IPS` | loopback + private ranges | Trusted proxy hosts for `X-Forwarded-For`. **Never `*`** — that trusts a client-supplied header and lets a spoofed IP evade the admin throttle. |
-| `ENTRY_TOKEN_CAP` | `2000` | Max tokens per entry. |
+| `ENTRY_TOKEN_CAP` | `2000` | Soft cap: over it a write is flagged (`soft_cap_exceeded`), not rejected. |
+| `ENTRY_TOKEN_TARGET` | `8000` | Compaction sweep trigger + the size compaction compresses toward; exceeded only when the content is irreducible. |
+| `ENTRY_TOKEN_HARD_CAP` | `10000` | Hard cap: `memory_upsert` above it is rejected. |
 | `FRAGMENT_TOKEN_CAP` | `500` | Max tokens per fragment. |
-| `COMPACTION_FRAGMENT_THRESHOLD` | `3` | Fragments before `compaction_due`. |
+| `COMPACTION_FRAGMENT_THRESHOLD` | `3` | Fragments before `compaction_due` (the other trigger is size over `ENTRY_TOKEN_TARGET`). |
 | `HARD_LIMIT_FRAGMENTS` | `10` | Pending fragments before append backpressure. |
 | `RATE_LIMIT_PER_MINUTE` | `120` | Per-key request cap → `RATE_LIMITED`. |
 | `ENABLE_HYBRID_SEARCH` | `true` | Pgvector hybrid retrieval (lexical + vector, RRF-merged); on by default, set `false` for pure lexical. |

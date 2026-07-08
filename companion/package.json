@@ -1,6 +1,6 @@
 {
   "name": "archivist-connect",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "One-command setup (npx archivist-connect) plus the optional Claude Code companion (auto-capture, sweep, session index) for the Archivist shared-memory MCP server.",
   "type": "module",
   "license": "MIT",

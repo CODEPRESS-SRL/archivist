@@ -59,9 +59,12 @@ The rule is encoded in the MCP instructions.
    rewrites. The only allowed 409 is on compaction (`expected_version`).
 3. **Compaction is atomic and idempotent.** It consumes only fragments
    with `id <= last_fragment_id` as read; a concurrent append survives.
-4. **Tokens via tiktoken (cl100k_base).** Never `len(s)//4`. Entry cap
-   ~2,000 tokens; compaction threshold: >3 fragments or 2/3 of the cap;
-   hard limit 10 fragments → append rejected (backpressure).
+4. **Tokens via tiktoken (cl100k_base).** Never `len(s)//4`. Three-tier
+   size model: soft cap ~2,000 (write flagged, not rejected), target 8,000
+   (compaction sweep trigger + compression ceiling, exceeded only when
+   irreducible), hard cap 10,000 (write rejected). Compaction threshold: >3
+   fragments or merged size over the 8k target; hard limit 10 fragments →
+   append rejected (backpressure).
 5. **Keywords normalized server-side.** lowercase, trim, slug.
    `memory_search` suggests related keywords to prevent duplicates.
 6. **Actionable errors.** Every rejection (cap, backpressure, 409) must

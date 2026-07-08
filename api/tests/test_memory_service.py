@@ -285,17 +285,32 @@ async def test_compaction_due_true_over_fragment_threshold(db_engine: object, te
     assert r["compaction_due"] is True
 
 
-async def test_compaction_due_true_over_token_ratio(db_engine: object, team_id: int) -> None:
-    # One large-but-legal fragment pushes base+fragments over the token ratio
-    # while pending (1) stays under the fragment threshold: exercises the OR.
-    base = "word " * 1000  # < entry cap
+async def test_compaction_due_true_over_token_target(db_engine: object, team_id: int) -> None:
+    # base + one legal fragment pushes the merged size over the 8k target while
+    # pending (1) stays under the fragment threshold: exercises the OR branch.
+    base = "word " * (_SETTINGS.entry_token_target - 200)  # < hard cap, near target
     await _create(team_id, "redis-cache", base)
     frag = "word " * 400  # < fragment cap
     r = await _append(team_id, "redis-cache", frag)
-    threshold = _SETTINGS.entry_token_cap * _SETTINGS.compaction_token_ratio
-    assert count_tokens(base) + count_tokens(frag) > threshold
+    assert count_tokens(base) + count_tokens(frag) > _SETTINGS.entry_token_target
     assert r["pending_fragments"] == 1
     assert r["compaction_due"] is True
+
+
+async def test_compaction_due_false_between_soft_cap_and_target(
+    db_engine: object, team_id: int
+) -> None:
+    # An entry above the 2k soft cap but below the 8k target, with pending under
+    # the fragment threshold, is NOT compaction_due: the 2k-8k band is an
+    # acceptable size, not swept. This is the core of the three-tier model.
+    base = "word " * 3000  # > soft cap (2000), < target (8000)
+    await _create(team_id, "redis-cache", base)
+    frag = "word " * 100
+    r = await _append(team_id, "redis-cache", frag)
+    assert count_tokens(base) > _SETTINGS.entry_token_cap
+    assert count_tokens(base) + count_tokens(frag) < _SETTINGS.entry_token_target
+    assert r["pending_fragments"] == 1
+    assert r["compaction_due"] is False
 
 
 # --- compact_entry ---------------------------------------------------------

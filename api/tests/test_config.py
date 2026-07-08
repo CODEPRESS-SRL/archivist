@@ -54,3 +54,15 @@ def test_entry_token_hard_cap_default() -> None:
     assert settings.entry_token_cap == 2000  # soft cap unchanged
     assert settings.entry_token_hard_cap == 10000  # new hard cap
     assert settings.entry_token_hard_cap > settings.entry_token_cap
+
+
+def test_entry_token_target_default() -> None:
+    from app.config import Settings
+
+    settings = Settings()
+    # Three-tier model: soft cap (2k warning) < target (8k sweep trigger /
+    # compaction ceiling) < hard cap (10k reject).
+    assert settings.entry_token_target == 8000
+    assert settings.entry_token_cap < settings.entry_token_target < settings.entry_token_hard_cap
+    # compaction_token_ratio is superseded by the explicit target.
+    assert not hasattr(settings, "compaction_token_ratio")

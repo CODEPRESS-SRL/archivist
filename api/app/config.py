@@ -27,14 +27,20 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://archivist:archivist@localhost:5432/archivist"
 
-    # Token caps
+    # Token caps — three-tier model:
+    #   soft cap (2k)  -> write is flagged (soft_cap_exceeded), not rejected;
+    #                     an aspiration for compact entries.
+    #   target (8k)    -> compaction_due sweep trigger AND the ceiling the
+    #                     companion compresses toward; exceeded only when the
+    #                     content is genuinely irreducible.
+    #   hard cap (10k) -> writes above this are rejected (absolute backstop).
     entry_token_cap: int = 2000  # SOFT cap — over this the write is flagged, not rejected
+    entry_token_target: int = 8000  # compaction sweep trigger / compression ceiling
     entry_token_hard_cap: int = 10000  # HARD cap — writes above this are rejected
     fragment_token_cap: int = 500
 
     # Compaction thresholds
     compaction_fragment_threshold: int = 3
-    compaction_token_ratio: float = 0.66
     hard_limit_fragments: int = 10
 
     # Search / rate limiting

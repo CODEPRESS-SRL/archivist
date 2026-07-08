@@ -110,9 +110,11 @@ Bounds that keep entries dense and queues finite (all configurable — see
 
 | Bound | Default | Effect when exceeded |
 |---|---|---|
-| Entry size | 2000 tokens | `memory_upsert` rejects → compress or split the concept |
+| Entry soft cap | 2000 tokens | write flagged (`soft_cap_exceeded`), **not** rejected — aim to stay compact |
+| Entry target | 8000 tokens | sets `compaction_due=true`; the ceiling compaction compresses toward, exceeded only if the content is irreducible |
+| Entry hard cap | 10000 tokens | `memory_upsert` rejects → compress or split the concept |
 | Fragment size | 500 tokens | `memory_append` rejects → refine down to essentials |
-| Compaction threshold | > 3 fragments, or base+fragments > 2/3 of the cap | sets `compaction_due=true` |
+| Compaction threshold | > 3 fragments, or base+fragments > the 8000-token target | sets `compaction_due=true` |
 | Hard fragment limit | 10 pending | `memory_append` rejects → compact first (backpressure) |
 
 Tokens are counted with **tiktoken** (`cl100k_base`), never a character
