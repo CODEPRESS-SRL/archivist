@@ -1,0 +1,6 @@
+{"asset":"aaa","date":"2026-01-01","title":"AAA declares dividend","body":"Board approved a dividend of $0.10 per share.","facts":[{"type":"dividend","value":"0.10","unit":"USD"}]}
+{"asset":"aaa","date":"2026-01-02","title":"AAA shares slide","body":"The stock fell 3.0% after weak guidance.","facts":[{"type":"price_move","value":"-3.0","unit":"%"}]}
+{"asset":"bbb","date":"2026-01-01","title":"BBB upgraded","body":"Analyst upgraded the stock to overweight.","facts":[{"type":"rating","value":"upgrade"}]}
+{"asset":"bbb","date":"2026-01-02","title":"BBB steady","body":"No material news today.","facts":[]}
+{"asset":"ccc","date":"2026-01-01","title":"CCC dividend cut","body":"CCC lowered its dividend to $0.05 per share.","facts":[{"type":"dividend","value":"0.05","unit":"USD"}]}
+{"asset":"ccc","date":"2026-01-02","title":"CCC rallies","body":"Shares jumped 5.5% on the news.","facts":[{"type":"price_move","value":"5.5","unit":"%"}]}
