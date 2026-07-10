@@ -121,11 +121,13 @@ tool's own description: "3-LAYER WORKFLOW: search → timeline → get_observati
   adapter's fixed interface.
 - `timeline` (`tag`) → `GET /api/timeline?query=<tag>&project=<tag>`.
   `timeline` **requires** `anchor` or `query`; the adapter contract only
-  passes `tag`, so `tag` is reused as the `query` value. For a real
-  (non-empty) benchmark project this returns the same kind of injected
-  index the SessionStart hook would show; for an empty project it degrades
-  gracefully to a short "no timeline context available" message (verified
-  above), which is an acceptable footprint baseline (near-zero tokens).
+  passes `tag`, so `tag` is reused as the `query` value. For an empty
+  project it degrades gracefully to a short "no timeline context available"
+  message (verified above), which is an acceptable footprint baseline
+  (near-zero tokens). For a real (non-empty) benchmark project, it is
+  ASSUMED to return the same kind of injected index the SessionStart hook
+  would show, but this has NEVER been verified against populated data —
+  see Uncertainty below.
 - `delete_by_tag` (`tag`) → **no such tool or HTTP route exists** in
   claude-mem (confirmed: full-text search of `worker-service.cjs` for
   `DELETE FROM observations` and for any `r.delete("/api/...")` route
@@ -139,6 +141,16 @@ tool's own description: "3-LAYER WORKFLOW: search → timeline → get_observati
 
 ## Uncertainty / risks (flagged, not resolved)
 
+- **UNVALIDATED — timeline-as-growing-index (blocks trusting real
+  claude-mem footprint numbers):** `timeline(query=<tag>, project=<tag>)`
+  was only probed against empty/nonexistent projects. It is ASSUMED to
+  return the accumulating session-index (which is what `context_footprint`
+  measures), but whether `query=<literal tag>` returns "everything in the
+  project" vs a fuzzy search that may match nothing against real observation
+  text was never verified against populated data. If it's the latter, the
+  real-run footprint could flatline regardless of accumulation — silently
+  defeating the growth measurement. MUST validate against a live, populated
+  project before publishing claude-mem numbers.
 - **Concurrent-write risk on the sqlite fallback.** The worker is a live
   daemon holding its own connection to `claude-mem.db` (WAL mode). A raw
   file-level `DELETE` from a second process is not coordinated with the
