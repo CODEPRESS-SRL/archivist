@@ -33,7 +33,7 @@ class ArchivistAdapter:
         exists = bool(got.get("entries"))
         if not exists:
             resp = await self._call(
-                "memory_upsert", {"project": self._project, "keyword": kw, "value": fragment}
+                "memory_upsert", {"project": self._project, "keyword": kw, "content": fragment}
             )
         else:
             resp = await self._call(
@@ -45,18 +45,20 @@ class ArchivistAdapter:
     async def maybe_compact(self, asset: str) -> CompactResult | None:
         if not self._compaction_due.get(asset):
             return None
-        search = await self._call(
-            "memory_search", {"project": self._project, "query": asset, "intent": "read"}
-        )
         got = await self._call("memory_get", {"project": self._project, "keywords": asset})
         entry = (got.get("entries") or [{}])[0]
         fragments = [f["content"] for f in entry.get("fragments", [])]
-        current = entry.get("value", "")
+        current = entry.get("content", "")
         merged, llm = await self._engine.merge(asset, current, fragments)
         await self._call(
             "memory_upsert",
-            {"project": self._project, "keyword": asset, "value": merged,
-             "expected_version": entry.get("version")},
+            {
+                "project": self._project,
+                "keyword": asset,
+                "content": merged,
+                "expected_version": entry.get("version"),
+                "last_fragment_id": entry.get("last_fragment_id"),
+            },
         )
         self._compaction_due[asset] = False
         return CompactResult(llm_tokens=llm, merged=True)
@@ -64,16 +66,24 @@ class ArchivistAdapter:
     async def context_footprint(self) -> FootprintSnapshot:
         listing = await self._call("memory_list", {"project": self._project})
         entries = listing.get("entries", [])
-        total = sum(int(e.get("size_tokens", 0)) for e in entries)
+        total = sum(int(e.get("token_count", 0)) for e in entries)
         index_text = "\n".join(str(e.get("keyword", "")) for e in entries)
         total += count_tokens(index_text)
         return FootprintSnapshot(startup_tokens=total, detail={"entries": len(entries)})
 
     async def retrieve(self, query: str) -> RetrieveResult:
-        res = await self._call(
+        search = await self._call(
             "memory_search", {"project": self._project, "query": query, "intent": "read"}
         )
-        parts = [r.get("value", "") for r in res.get("results", [])]
+        keywords = [r["keyword"] for r in search.get("results", [])]
+        if not keywords:
+            return RetrieveResult(payload="", tokens=0)
+        got = await self._call("memory_get", {"project": self._project, "keywords": keywords})
+        parts: list[str] = []
+        for e in got.get("entries", []):
+            if e.get("content"):
+                parts.append(e["content"])
+            parts.extend(f["content"] for f in e.get("fragments", []))
         payload = "\n---\n".join(parts)
         return RetrieveResult(payload=payload, tokens=count_tokens(payload))
 
