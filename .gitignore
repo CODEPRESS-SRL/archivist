@@ -31,3 +31,8 @@ Thumbs.db
 
 # Superpowers working docs (specs/plans) — local only, never committed
 docs/superpowers/
+
+# Benchmark dataset (extracted from real DB) — local only
+benchmark/data/*
+!benchmark/data/schema.json
+!benchmark/data/sample/

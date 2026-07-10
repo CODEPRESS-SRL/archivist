@@ -1,0 +1,27 @@
+[project]
+name = "archivist-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "tiktoken>=0.13",
+    "anthropic>=0.40",
+    "mcp>=1.2",
+    "sqlite-vec>=0.1.6",
+    "fastembed>=0.4",
+    "matplotlib>=3.9",
+    "psycopg[binary]>=3.2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/benchmark"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
