@@ -8,7 +8,7 @@ class FakeLLM:
     def __init__(self):
         self.calls = []
 
-    async def complete(self, system: str, user: str) -> str:
+    async def complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
         self.calls.append((system, user))
         return "REFINED: " + user[:20]
 

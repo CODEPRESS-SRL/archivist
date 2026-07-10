@@ -30,27 +30,27 @@ _MERGE_SYS = (
 
 
 class LLMClient(Protocol):
-    async def complete(self, system: str, user: str) -> str: ...
+    async def complete(self, system: str, user: str, max_tokens: int = 1024) -> str: ...
 
 
 class WriteEngine:
     def __init__(self, client: LLMClient) -> None:
         self._client = client
 
-    async def _run(self, system: str, user: str) -> tuple[str, int]:
-        out = await self._client.complete(system, user)
+    async def _run(self, system: str, user: str, max_tokens: int) -> tuple[str, int]:
+        out = await self._client.complete(system, user, max_tokens=max_tokens)
         return out, count_tokens(system) + count_tokens(user) + count_tokens(out)
 
     async def refine_fragment(self, news: News) -> tuple[str, int]:
-        return await self._run(_REFINE_SYS, f"[{news.date}] {news.title}\n{news.body}")
+        return await self._run(_REFINE_SYS, f"[{news.date}] {news.title}\n{news.body}", max_tokens=1024)
 
     async def make_observation(self, news: News) -> tuple[str, int]:
-        return await self._run(_OBS_SYS, f"[{news.date}] {news.title}\n{news.body}")
+        return await self._run(_OBS_SYS, f"[{news.date}] {news.title}\n{news.body}", max_tokens=1024)
 
     async def merge(self, keyword: str, current: str, fragments: list[str]) -> tuple[str, int]:
         joined = "\n---\n".join(fragments)
         user = f"KEYWORD: {keyword}\nCURRENT VALUE:\n{current}\n\nNEW FRAGMENTS:\n{joined}"
-        return await self._run(_MERGE_SYS, user)
+        return await self._run(_MERGE_SYS, user, max_tokens=8192)
 
 
 class AnthropicClient:
@@ -60,10 +60,10 @@ class AnthropicClient:
         import anthropic  # imported lazily so tests never need the SDK/key
         self._c = anthropic.AsyncAnthropic(api_key=api_key)
 
-    async def complete(self, system: str, user: str) -> str:
+    async def complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
         msg = await self._c.messages.create(
             model=MODEL,
-            max_tokens=1500,
+            max_tokens=max_tokens,
             temperature=0,
             system=system,
             messages=[{"role": "user", "content": user}],
