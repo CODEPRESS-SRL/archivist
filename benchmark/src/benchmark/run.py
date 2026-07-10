@@ -69,6 +69,8 @@ async def main() -> None:
     ap.add_argument("--checkpoint-every", type=int, default=30)
     args = ap.parse_args()
 
+    os.makedirs("results", exist_ok=True)
+
     dataset = load_dataset(args.dataset)
     probes = load_probes(args.probes)
     engine = WriteEngine(AnthropicClient())
@@ -77,7 +79,7 @@ async def main() -> None:
     cm_call, cm_close = make_claude_mem_caller()
     adapters = [
         ArchivistAdapter(call_tool=arch_call, engine=engine, project="benchmark-marketsgazette"),
-        ClaudeMemAdapter(call_tool=cm_call, engine=engine, tag="benchmark"),
+        ClaudeMemAdapter(call_tool=cm_call, engine=engine, tag="archivist-benchmark"),
         RagWikiAdapter(db_path="results/wiki.db"),
     ]
     try:

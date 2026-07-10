@@ -180,7 +180,7 @@ tool's own description: "3-LAYER WORKFLOW: search → timeline → get_observati
 
 ## Isolation used by the benchmark
 
-`make_claude_mem_caller(project="archivist-benchmark", ...)` — a project
+`make_claude_mem_caller(tag="archivist-benchmark", ...)` — a project
 name not present in the real `GET /api/projects` listing at investigation
 time (47 existing real projects enumerated, none named
 `archivist-benchmark`), used everywhere the adapter's `tag` is threaded
