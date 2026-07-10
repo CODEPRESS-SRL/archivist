@@ -1,5 +1,6 @@
 import pytest
 
+from benchmark.engine import FreeTierBudgetExceeded
 from benchmark.run import simulate
 from benchmark.types import CompactResult, FootprintSnapshot, News, RetrieveResult, WriteResult
 
@@ -35,3 +36,20 @@ async def test_simulate_records_one_row_per_checkpoint(dataset):
 async def test_simulate_accumulates_write_cost(dataset):
     rows = await simulate(dataset, [CountingAdapter("x")], [], checkpoint_every=2)
     assert rows[-1]["write_tokens_cumulative"] == 6  # 2 assets * 3 days
+
+
+class BudgetStoppingAdapter(CountingAdapter):
+    """Raises the free-tier budget error partway through, like the real gate."""
+    async def write(self, news):
+        self._n += 1
+        if self._n > 3:
+            raise FreeTierBudgetExceeded("budget reached")
+        return WriteResult(llm_tokens=1)
+
+
+async def test_simulate_writes_partial_results_on_budget_stop(dataset):
+    # The RPD guard tripping mid-run must NOT crash simulate or lose everything —
+    # it records a final truncated checkpoint and returns.
+    rows = await simulate(dataset, [BudgetStoppingAdapter("x")], [], checkpoint_every=1)
+    assert rows, "partial results should still be written after a budget stop"
+    assert rows[-1].get("budget_stopped") is True

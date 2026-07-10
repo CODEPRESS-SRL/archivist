@@ -36,16 +36,33 @@ def load_dataset(path: str) -> dict[str, list[News]]:
 
 
 def _top5_query() -> str:
-    # Adjust table/column names during the real extraction after inspecting the schema.
+    # Adapted to the real backend_news schema (2026-07-10): there is no asset FK
+    # on `news` (the `assets`/`news_assets` tables are unpopulated). The per-news
+    # asset associations live in `ai_data->'assets'` — a JSON array of
+    # {name, ticker, country, sentiment}. We explode that, rank tickers by news
+    # count, take the top 10, and emit one row per (news, top-10 ticker). Title
+    # and content are the ORIGINAL English article text (only ai_data.* is Italian).
     return """
-        WITH top AS (
-            SELECT asset_id, COUNT(*) AS n FROM news
-            GROUP BY asset_id ORDER BY n DESC LIMIT 5
+        WITH exploded AS (
+            SELECT a->>'ticker' AS ticker,
+                   n.date::date  AS d,
+                   n.title       AS title,
+                   n.content     AS body
+            FROM news n,
+                 jsonb_array_elements(n.ai_data->'assets') a
+            WHERE n.ai_data ? 'assets'
+              AND a->>'ticker' IS NOT NULL
+              AND n.title IS NOT NULL
+              AND n.content IS NOT NULL
+        ),
+        top AS (
+            SELECT ticker FROM exploded
+            GROUP BY ticker ORDER BY COUNT(*) DESC LIMIT 10
         )
-        SELECT a.ticker, n.published_at::date AS d, n.title, n.body
-        FROM news n JOIN asset a ON a.id = n.asset_id
-        WHERE n.asset_id IN (SELECT asset_id FROM top)
-        ORDER BY a.ticker, d
+        SELECT ticker, d, title, body
+        FROM exploded
+        WHERE ticker IN (SELECT ticker FROM top)
+        ORDER BY ticker, d
     """
 
 

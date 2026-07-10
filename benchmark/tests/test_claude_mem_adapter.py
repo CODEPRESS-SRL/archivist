@@ -15,7 +15,7 @@ class FakeClaudeMem:
         if name == "search":
             hits = [o for o in self.obs if args["query"].lower() in o["text"].lower()]
             return {"results": [{"text": o["text"]} for o in hits]}
-        if name == "timeline":  # used for footprint: the injected index
+        if name == "context_index":  # footprint: the SessionStart injected index
             return {"index": "\n".join(o["text"][:40] for o in self.obs)}
         return {}
 

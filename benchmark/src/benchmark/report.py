@@ -54,7 +54,7 @@ def main() -> None:
         rows = json.load(fh)
     print(summarize(rows))
     render_footprint_chart(rows, args.chart)
-    print(f"\nchart → {args.chart}")
+    print(f"\nchart -> {args.chart}")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "tiktoken>=0.13",
     "anthropic>=0.40",
+    "google-genai>=1.0",
     "mcp>=1.2",
     "sqlite-vec>=0.1.6",
     "fastembed>=0.4",

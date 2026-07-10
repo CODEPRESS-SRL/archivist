@@ -11,9 +11,17 @@ def test_extracts_rating_downgrade():
     assert any(f.type == "rating" and f.value == "downgrade" for f in facts)
 
 
-def test_extracts_price_move_percent():
+def test_extracts_percentage_verbatim():
+    # value must be a token that appears literally in the text (probe = re.escape(value))
     facts = extract_facts("Acme shares slide", "The stock fell 4.2% after the report.")
-    assert any(f.type == "price_move" and f.value == "-4.2" and f.unit == "%" for f in facts)
+    pct = next(f for f in facts if f.type == "pct")
+    assert pct.value == "4.2%" and pct.unit == "%"
+    assert "4.2%" in ("Acme shares slide. The stock fell 4.2% after the report.")
+
+
+def test_extracts_dollar_amount_verbatim():
+    facts = extract_facts("SK Hynix Seeks Funds", "SK Hynix seeks $29 billion with a new US listing.")
+    assert any(f.type == "usd" and f.value == "$29 billion" for f in facts)
 
 
 def test_no_facts_returns_empty():

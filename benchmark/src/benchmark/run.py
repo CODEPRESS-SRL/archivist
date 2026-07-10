@@ -3,13 +3,36 @@ adapter, snapshot footprint + probes at monthly checkpoints."""
 from __future__ import annotations
 
 import json
+import sys
 
+from benchmark.engine import FreeTierBudgetExceeded
 from benchmark.probes import Probe, evaluate
 
 
 def _timeline(dataset: dict) -> list[str]:
     dates = sorted({n.date for items in dataset.values() for n in items})
     return dates
+
+
+async def _record_checkpoint(rows, adapters, probes, i, date, write_cost, *, budget_stopped=False):
+    # Checkpoints cost ZERO LLM calls: footprint + retrieve use MCP/HTTP/local
+    # embeddings, never the write-engine. Safe to record even after a budget stop.
+    for a in adapters:
+        fp = await a.context_footprint()
+        rep = await evaluate(a, probes, as_of_date=date)
+        row = {
+            "adapter": a.name,
+            "day": i + 1,
+            "date": date,
+            "footprint_tokens": fp.startup_tokens,
+            "recall": rep.recall,
+            "survival_recall": rep.survival_recall,
+            "avg_retrieve_tokens": rep.avg_retrieve_tokens,
+            "write_tokens_cumulative": write_cost[a.name],
+        }
+        if budget_stopped:
+            row["budget_stopped"] = True
+        rows.append(row)
 
 
 async def simulate(dataset, adapters, probes: list[Probe], checkpoint_every: int = 30) -> list[dict]:
@@ -20,34 +43,32 @@ async def simulate(dataset, adapters, probes: list[Probe], checkpoint_every: int
     write_cost: dict[str, int] = {a.name: 0 for a in adapters}
     rows: list[dict] = []
 
-    for i, date in enumerate(dates):
-        for asset in dataset:
-            news = by_asset_date.get((asset, date))
-            if news is None:
-                continue
-            for a in adapters:
-                wr = await a.write(news)
-                write_cost[a.name] += wr.llm_tokens
-                comp = await a.maybe_compact(asset)
-                if comp:
-                    write_cost[a.name] += comp.llm_tokens
+    i = date = None
+    try:
+        for i, date in enumerate(dates):
+            for asset in dataset:
+                news = by_asset_date.get((asset, date))
+                if news is None:
+                    continue
+                for a in adapters:
+                    wr = await a.write(news)
+                    write_cost[a.name] += wr.llm_tokens
+                    comp = await a.maybe_compact(asset)
+                    if comp:
+                        write_cost[a.name] += comp.llm_tokens
 
-        is_checkpoint = (i + 1) % checkpoint_every == 0 or i == len(dates) - 1
-        if not is_checkpoint:
-            continue
-        for a in adapters:
-            fp = await a.context_footprint()
-            rep = await evaluate(a, probes, as_of_date=date)
-            rows.append({
-                "adapter": a.name,
-                "day": i + 1,
-                "date": date,
-                "footprint_tokens": fp.startup_tokens,
-                "recall": rep.recall,
-                "survival_recall": rep.survival_recall,
-                "avg_retrieve_tokens": rep.avg_retrieve_tokens,
-                "write_tokens_cumulative": write_cost[a.name],
-            })
+            is_checkpoint = (i + 1) % checkpoint_every == 0 or i == len(dates) - 1
+            if is_checkpoint:
+                await _record_checkpoint(rows, adapters, probes, i, date, write_cost)
+    except FreeTierBudgetExceeded as e:
+        # Free-tier RPD guard tripped mid-run: capture a final checkpoint at the
+        # furthest state reached (checkpoints are LLM-free) so partial results
+        # still get written, then stop cleanly.
+        print(f"[benchmark] {e}", file=sys.stderr)
+        print(f"[benchmark] recording a final (truncated) checkpoint at day {i + 1} ({date})",
+              file=sys.stderr)
+        await _record_checkpoint(rows, adapters, probes, i, date, write_cost, budget_stopped=True)
+
     return rows
 
 
@@ -58,7 +79,7 @@ async def main() -> None:
     from benchmark.adapters.archivist import ArchivistAdapter, make_mcp_caller
     from benchmark.adapters.claude_mem import ClaudeMemAdapter, make_claude_mem_caller
     from benchmark.adapters.rag_wiki import RagWikiAdapter
-    from benchmark.engine import AnthropicClient, WriteEngine
+    from benchmark.engine import WriteEngine, make_llm_client
     from benchmark.extract import load_dataset
     from benchmark.probes import load_probes
 
@@ -73,7 +94,7 @@ async def main() -> None:
 
     dataset = load_dataset(args.dataset)
     probes = load_probes(args.probes)
-    engine = WriteEngine(AnthropicClient())
+    engine = WriteEngine(make_llm_client())
 
     arch_call, arch_close = make_mcp_caller(os.environ["ARCHIVIST_MCP_URL"], os.environ["ARCHIVIST_API_KEY"])
     cm_call, cm_close = make_claude_mem_caller()

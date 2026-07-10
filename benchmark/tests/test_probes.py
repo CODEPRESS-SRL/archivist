@@ -32,3 +32,27 @@ async def test_survival_recall_uses_only_old_probes(probes):
 async def test_probe_excluded_before_available_from(probes):
     rep = await evaluate(StubAdapter("0.10 and 0.05"), probes, as_of_date="2025-12-01")
     assert rep.total == 0  # nothing available yet
+
+
+def test_make_probes_cli_writes_reviewable_file(tmp_path, monkeypatch):
+    import json
+    import sys
+
+    from benchmark import probes as P
+
+    ds = tmp_path / "ds.jsonl"
+    ds.write_text(
+        json.dumps({
+            "asset": "aaa", "date": "2026-01-01", "title": "AAA dividend",
+            "body": "Dividend of $0.10.",
+            "facts": [{"type": "dividend", "value": "0.10", "unit": "USD"}],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "probes.json"
+    monkeypatch.setattr(sys, "argv", ["make_probes", "--dataset", str(ds), "--out", str(out)])
+    P.main()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert len(data) == 1
+    assert data[0]["query"] == "dividend aaa"
+    assert "0" in data[0]["pattern"]  # escaped value present

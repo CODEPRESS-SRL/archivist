@@ -2,6 +2,7 @@
 under test. Footprint = the index its SessionStart hook would inject."""
 from __future__ import annotations
 
+import os
 from typing import Awaitable, Callable
 
 from benchmark.tokens import count_tokens
@@ -30,7 +31,13 @@ class ClaudeMemAdapter:
         return None  # claude-mem does not recompress
 
     async def context_footprint(self) -> FootprintSnapshot:
-        res = await self._call("timeline", {"tag": self._tag})
+        # The honest footprint is what claude-mem's SessionStart hook actually
+        # injects — its recent-observations index (default last 50), which grows
+        # with accumulation. NOT `timeline`, whose query form returns only a
+        # fixed ±10-record window around one fuzzy anchor and so flatlines
+        # regardless of how much the project accumulates (validated live against
+        # populated projects — see docs/claude-mem-access.md).
+        res = await self._call("context_index", {"tag": self._tag})
         index = res.get("index", "")
         return FootprintSnapshot(startup_tokens=count_tokens(index), detail={"source": "session-index"})
 
@@ -65,19 +72,29 @@ def make_claude_mem_caller(tag: str = "archivist-benchmark", data_dir: str | Non
     Binds:
       - save_memory   -> POST /api/memory/save        {text: content, project: tag}
       - search        -> GET  /api/search             {query, project: tag}
-      - timeline      -> GET  /api/timeline            {query: tag, project: tag}
-                         (timeline requires anchor OR query; tag doubles as query)
+      - context_index -> GET  /api/context/inject      {project: tag}
+                         The real SessionStart footprint: the recent-observations
+                         semantic index (default last 50 obs) the hook injects.
+                         Grows with accumulation — VALIDATED live 2026-07-10
+                         against populated projects. (timeline's query form was
+                         rejected for footprint: it returns only a ±10-record
+                         window around one fuzzy anchor and flatlines.)
       - delete_by_tag -> direct sqlite DELETE, scoped to project = tag (no real
                          claude-mem tool/route exists for this — see docs)
 
     Integration-only: exercised by run.py against a live claude-mem install, never by
     the unit tests in test_claude_mem_adapter.py (those use FakeClaudeMem).
 
-    # TODO(real-run): validate against a live claude-mem worker before trusting
-    # benchmark numbers — in particular the sqlite DELETE fallback races with the
-    # live worker's own WAL writes (no coordination beyond a busy_timeout), and the
-    # Chroma vector store (~/.claude-mem/chroma/) is not cleaned by reset() at all.
-    # See benchmark/docs/claude-mem-access.md, section "Uncertainty / risks".
+    # Footprint source RESOLVED 2026-07-10: switched from timeline (±10-record
+    # window, flatlines) to /api/context/inject (the real SessionStart index,
+    # grows to a ~50-obs plateau), validated live against populated projects.
+    # TODO(real-run): two risks remain before fully trusting numbers — the sqlite
+    # DELETE fallback races with the live worker's own WAL writes (no coordination
+    # beyond a busy_timeout), and the Chroma vector store (~/.claude-mem/chroma/)
+    # is not cleaned by reset() at all. Also: /api/memory/save enqueues async
+    # processing (claude-mem's own LLM), so a saved observation may not appear in
+    # the inject index until processed — pace writes or drain the queue at
+    # checkpoints. See benchmark/docs/claude-mem-access.md, section "Uncertainty".
     """
     import json
     from pathlib import Path
@@ -111,12 +128,21 @@ def make_claude_mem_caller(tag: str = "archivist-benchmark", data_dir: str | Non
                 resp.raise_for_status()
                 text = _extract_text(resp.json())
                 return {"results": [{"text": text}] if text else []}
-            if name == "timeline":
-                resp = await client.get(
-                    "/api/timeline", params={"query": project, "project": project}
-                )
-                resp.raise_for_status()
-                return {"index": _extract_text(resp.json())}
+            if name == "context_index":
+                # HONEST FOOTPRINT (fixed 2026-07-10 after the first real run):
+                # /api/context/inject renders only from `session_summaries`, which
+                # are produced by claude-mem's session-processing pipeline when a
+                # real Claude Code session ends — NOT by the raw /api/memory/save
+                # writes this benchmark makes. So inject flat-lines at the empty
+                # baseline for synthetic writes ("No previous sessions found"),
+                # even with 91 observations in the store. Reconstruct the recent-N
+                # observation index claude-mem WOULD inject at SessionStart from
+                # the observation store instead: it grows with accumulation to the
+                # ~50-obs plateau (CLAUDE_MEM_CONTEXT_OBSERVATIONS), the behaviour
+                # the footprint comparison is about. See docs/claude-mem-access.md.
+                limit = int(os.environ.get("CLAUDE_MEM_CONTEXT_OBSERVATIONS", "50"))
+                index = _recent_obs_index_via_sqlite(base / "claude-mem.db", project, limit)
+                return {"index": index}
             if name == "delete_by_tag":
                 return _delete_by_project_via_sqlite(base / "claude-mem.db", project)
             return {}
@@ -150,3 +176,36 @@ def _delete_by_project_via_sqlite(db_path, project: str) -> dict:
         return {"deleted": cur.rowcount}
     finally:
         conn.close()
+
+
+def _recent_obs_index_via_sqlite(db_path, project: str, limit: int = 50) -> str:
+    """Reconstruct the recent-observations index claude-mem injects at SessionStart.
+
+    claude-mem's own SessionStart hook surfaces the most recent `limit`
+    observations (default 50) as a compact title index; that index — not the
+    full store — is the honest context footprint. `/api/context/inject` renders
+    it from `session_summaries`, which only real Claude Code sessions produce, so
+    for the benchmark's raw writes we build the same index from the observation
+    store directly. Grows with accumulation, then plateaus at `limit`."""
+    import sqlite3
+
+    if not db_path.exists():
+        return ""
+    conn = sqlite3.connect(db_path, timeout=10.0)
+    try:
+        rows = conn.execute(
+            "SELECT title, subtitle FROM observations WHERE project = ? "
+            "ORDER BY created_at_epoch DESC LIMIT ?",
+            (project, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return ""
+    lines = [f"# [{project}] recent context index ({len(rows)} observations)", ""]
+    for i, (title, subtitle) in enumerate(rows, 1):
+        line = f"**#{i}** {title or ''}".rstrip()
+        if subtitle:
+            line += f" — {subtitle}"
+        lines.append(line)
+    return "\n".join(lines)

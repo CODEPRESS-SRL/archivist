@@ -3,6 +3,7 @@ tool-caller. Keyword == asset slug. Compaction merges via the write-engine and
 writes back with memory_upsert — the real long-run behaviour under test."""
 from __future__ import annotations
 
+import json
 from typing import Awaitable, Callable
 
 from benchmark.tokens import count_tokens
@@ -88,11 +89,34 @@ class ArchivistAdapter:
         return RetrieveResult(payload=payload, tokens=count_tokens(payload))
 
 
+def _parse_tool_result(result) -> dict:
+    """Normalize an MCP CallToolResult to the dict the adapter expects.
+
+    The prod Archivist server returns tool payloads as a JSON string inside a
+    text `content` block and leaves `structuredContent` unset, so reading only
+    `structuredContent` (as the first cut did) makes every read look empty —
+    the adapter then never sees existing entries and degrades every write to an
+    overwrite (no append, no compaction). Prefer `structuredContent` when the
+    server does populate it, else parse the concatenated text content as JSON."""
+    sc = getattr(result, "structuredContent", None)
+    if sc:
+        return sc
+    text = "".join(getattr(b, "text", "") for b in (getattr(result, "content", None) or []))
+    if text.strip():
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {"result": data}
+    return {}
+
+
 def make_mcp_caller(base_url: str, api_key: str):
     """Build a real Streamable-HTTP tool-caller bound to a persistent session.
 
     Returns (call_tool, aclose). Integration-only: exercised by run.py against
-    `make up`, not by unit tests.
+    the real server, not by unit tests (the JSON-normalization is unit-tested
+    via `_parse_tool_result`).
     """
     from contextlib import AsyncExitStack
 
@@ -115,7 +139,7 @@ def make_mcp_caller(base_url: str, api_key: str):
     async def call_tool(name: str, args: dict) -> dict:
         session = await _ensure()
         result = await session.call_tool(name, args)
-        return result.structuredContent or {}
+        return _parse_tool_result(result)
 
     async def aclose() -> None:
         await stack.aclose()
