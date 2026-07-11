@@ -99,3 +99,29 @@ Plus the 44 existing tests stay green. If the ablation lands, one test for
 ~6 months, ~80 writes/keyword, 10 keywords, sweep ×3 λ ⇒ ~2,400 LLM writes,
 **~$0.45 Gemini**, **~4-6h** wall-clock with the RPM throttle. Runs one λ at a
 time; each λ writes its metrics before the next.
+
+## Results (2026-07-11 run) — only λ=0.15 completed
+
+The run required a **caller rewrite**: over a multi-hour run the `mcp` SDK's
+long-lived streamable-HTTP session failed four stacked ways — a 429 on the
+checkpoint burst (per-key 120/min fixed-window limiter), the reverse proxy
+dropping the aged SSE session mid-checkpoint, anyio cancel-scope debris on
+session close, and `/mcp`→`/mcp/` redirect-doubling the counted requests. Since
+the server is `FastMCP(stateless_http=True)`, the caller is now a plain `httpx`
+POST per `tools/call` to the canonical `/mcp/` (no session), with a throttle and
+429/5xx/transport backoff. λ=0.5/0.85 were then blocked by the Gemini **monthly
+project spend cap**, so only **λ=0.15** (low novelty, 80 days) finished:
+
+| system | footprint 20→40→60→80 | recall | survival |
+|---|---|---|---|
+| Archivist | 2640→5623→10326→**12572** | **0.99** | **0.99** |
+| claude-mem | ~1260 (flat, 50-obs cap) | 0.21 | 0.27 |
+| rag-wiki | 0 | 0.11 | 0.12 |
+
+**Finding:** the original H1 — compaction keeps Archivist *bounded* — is **not
+supported even at low novelty**: the footprint grows ~5× (decelerating late, no
+clear plateau). The defensible result is the **footprint↔recall tradeoff**:
+Archivist pays ~10× claude-mem's footprint to retain ~4-5× the recall/survival;
+claude-mem is the bounded system, but bounded only by *forgetting*. Artifacts in
+`results/synth/`. To finish the λ-sweep, raise the Gemini spend cap and rerun
+`python -m benchmark.sweep --lambdas 0.5,0.85`.

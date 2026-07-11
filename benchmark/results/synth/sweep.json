@@ -1,0 +1,124 @@
+{
+  "0.15": [
+    {
+      "adapter": "archivist",
+      "day": 20,
+      "date": "2026-08-20",
+      "footprint_tokens": 2640,
+      "recall": 1.0,
+      "survival_recall": 1.0,
+      "avg_retrieve_tokens": 1627.642857142857,
+      "write_tokens_cumulative": 54709
+    },
+    {
+      "adapter": "claude-mem",
+      "day": 20,
+      "date": "2026-08-20",
+      "footprint_tokens": 1236,
+      "recall": 0.03571428571428571,
+      "survival_recall": 0.03571428571428571,
+      "avg_retrieve_tokens": 391.2142857142857,
+      "write_tokens_cumulative": 31669
+    },
+    {
+      "adapter": "rag-wiki",
+      "day": 20,
+      "date": "2026-08-20",
+      "footprint_tokens": 0,
+      "recall": 0.17857142857142858,
+      "survival_recall": 0.17857142857142858,
+      "avg_retrieve_tokens": 643.1428571428571,
+      "write_tokens_cumulative": 0
+    },
+    {
+      "adapter": "archivist",
+      "day": 40,
+      "date": "2026-09-09",
+      "footprint_tokens": 5623,
+      "recall": 0.9508196721311475,
+      "survival_recall": 0.9508196721311475,
+      "avg_retrieve_tokens": 2889.1147540983607,
+      "write_tokens_cumulative": 136885
+    },
+    {
+      "adapter": "claude-mem",
+      "day": 40,
+      "date": "2026-09-09",
+      "footprint_tokens": 1249,
+      "recall": 0.14754098360655737,
+      "survival_recall": 0.14754098360655737,
+      "avg_retrieve_tokens": 717.7213114754098,
+      "write_tokens_cumulative": 63516
+    },
+    {
+      "adapter": "rag-wiki",
+      "day": 40,
+      "date": "2026-09-09",
+      "footprint_tokens": 0,
+      "recall": 0.18032786885245902,
+      "survival_recall": 0.18032786885245902,
+      "avg_retrieve_tokens": 521.5573770491803,
+      "write_tokens_cumulative": 0
+    },
+    {
+      "adapter": "archivist",
+      "day": 60,
+      "date": "2026-09-29",
+      "footprint_tokens": 10326,
+      "recall": 0.97,
+      "survival_recall": 0.97,
+      "avg_retrieve_tokens": 6428.87,
+      "write_tokens_cumulative": 319586
+    },
+    {
+      "adapter": "claude-mem",
+      "day": 60,
+      "date": "2026-09-29",
+      "footprint_tokens": 1287,
+      "recall": 0.28,
+      "survival_recall": 0.28,
+      "avg_retrieve_tokens": 752.59,
+      "write_tokens_cumulative": 96806
+    },
+    {
+      "adapter": "rag-wiki",
+      "day": 60,
+      "date": "2026-09-29",
+      "footprint_tokens": 0,
+      "recall": 0.12,
+      "survival_recall": 0.12,
+      "avg_retrieve_tokens": 541.48,
+      "write_tokens_cumulative": 0
+    },
+    {
+      "adapter": "archivist",
+      "day": 80,
+      "date": "2026-10-19",
+      "footprint_tokens": 12572,
+      "recall": 0.9937106918238994,
+      "survival_recall": 0.990990990990991,
+      "avg_retrieve_tokens": 7364.138364779874,
+      "write_tokens_cumulative": 686947
+    },
+    {
+      "adapter": "claude-mem",
+      "day": 80,
+      "date": "2026-10-19",
+      "footprint_tokens": 1266,
+      "recall": 0.2138364779874214,
+      "survival_recall": 0.2702702702702703,
+      "avg_retrieve_tokens": 771.5283018867924,
+      "write_tokens_cumulative": 129077
+    },
+    {
+      "adapter": "rag-wiki",
+      "day": 80,
+      "date": "2026-10-19",
+      "footprint_tokens": 0,
+      "recall": 0.11320754716981132,
+      "survival_recall": 0.11711711711711711,
+      "avg_retrieve_tokens": 432.1823899371069,
+      "write_tokens_cumulative": 0
+    }
+  ]
+}
