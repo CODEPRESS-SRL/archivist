@@ -44,7 +44,10 @@ async def run_sweep(lambdas=_LAMBDAS, *, writes_per_keyword=80, revision_rate=0.
             rows = await run_and_write(dataset, probes, project=project, out=out,
                                        checkpoint_every=checkpoint_every)
             runs[str(lam)] = rows
-        except Exception as e:  # noqa: BLE001 — one λ dying must not lose the others
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:  # noqa: BLE001 — incl. a terminal CancelledError:
+            # one λ dying (rate limit, session teardown) must not lose the others.
             print(f"[sweep] lambda={lam} FAILED: {type(e).__name__}: {e}", flush=True)
     return runs
 

@@ -111,100 +111,122 @@ def _parse_tool_result(result) -> dict:
     return {}
 
 
-def _is_rate_limited(exc: BaseException) -> bool:
-    """True if `exc` (or anything nested in it) is the server's 429/rate-limit.
+def _extract_rpc_result(resp) -> dict:
+    """Pull the tool payload out of a JSON-RPC-over-HTTP response and normalize it.
 
-    A 429 from prod arrives wrapped: httpx `HTTPStatusError` re-raised through
-    anyio's `ExceptionGroup` during the streamable-HTTP session teardown. Walk
-    sub-exceptions and causes so we recognise it wherever it hides."""
-    seen: list[str] = []
+    The stateless server answers a `tools/call` POST with either a single JSON
+    object or (usually) a `text/event-stream` body carrying one `data:` line. In
+    both cases the JSON-RPC envelope's `result` holds the tool output, which we
+    hand to `_parse_tool_result` (structuredContent, else the JSON text block)."""
+    import types
 
-    def walk(e: BaseException) -> None:
-        seen.append(str(e))
-        for sub in getattr(e, "exceptions", None) or []:
-            walk(sub)
-        if e.__cause__ is not None:
-            walk(e.__cause__)
+    ct = resp.headers.get("content-type", "")
+    msg = None
+    if "text/event-stream" in ct:
+        for line in resp.text.splitlines():
+            if line.startswith("data:"):
+                msg = json.loads(line[len("data:"):].strip())
+                break
+    elif resp.text.strip():
+        msg = resp.json()
+    if not msg:
+        return {}
+    if "error" in msg:
+        raise RuntimeError(f"MCP error: {msg['error']}")
+    result = msg.get("result", {}) or {}
+    shim = types.SimpleNamespace(
+        structuredContent=result.get("structuredContent"),
+        content=[types.SimpleNamespace(text=b.get("text", ""))
+                 for b in result.get("content", []) if isinstance(b, dict)],
+    )
+    return _parse_tool_result(shim)
 
-    walk(exc)
-    blob = " ".join(seen)
-    return "429" in blob or "Too Many Requests" in blob or "RATE_LIMITED" in blob
+
+_MAX_ATTEMPTS = 5
+_RATE_LIMIT_BACKOFF_S = 60.0   # one full fixed-window minute
 
 
-def make_mcp_caller(base_url: str, api_key: str, *, max_rpm: int | None = None):
-    """Build a real Streamable-HTTP tool-caller bound to a persistent session.
+def make_mcp_caller(base_url: str, api_key: str, *, max_rpm: int | None = None,
+                    _client=None, _sleep=None, _now=None):
+    """Build a tool-caller over the server's **stateless** Streamable-HTTP endpoint.
 
-    Returns (call_tool, aclose). Integration-only: exercised by run.py against
-    the real server, not by unit tests (JSON-normalization via `_parse_tool_result`
-    and 429-detection via `_is_rate_limited` are unit-tested).
-
-    The prod server rate-limits per key (default 120/min). The benchmark's
-    checkpoint retrieve-storm bursts far above that, so this caller (a) throttles
-    to a safe rate (env `ARCHIVIST_MAX_RPM`, default 90) with a min-interval gate,
-    and (b) on a 429 tears down the corrupted session, backs off, and retries on a
-    fresh one — a single 429 must not abort a multi-hour sweep."""
+    Returns (call_tool, aclose). The server is `FastMCP(stateless_http=True)`, so
+    every `tools/call` is an independent HTTP POST (no session-id, no `initialize`
+    handshake, no persistent SSE stream). Doing exactly that with a plain
+    `httpx.AsyncClient` sidesteps the whole failure class a long-lived MCP session
+    hit over a multi-hour run: a reverse-proxy idle-drop of the SSE stream, and the
+    anyio cancel-scope debris left when such a session is closed. What remains is
+    ordinary HTTP, so resilience is simple: throttle under the per-key rate limit
+    (env `ARCHIVIST_MAX_RPM`, default 90) and back off on 429 / 5xx / transport
+    errors. `_client`/`_sleep`/`_now` are unit-test seams."""
     import asyncio
     import os
     import time
-    from contextlib import AsyncExitStack
-
-    from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
 
     if max_rpm is None:
         max_rpm = int(os.environ.get("ARCHIVIST_MAX_RPM", "90"))
     min_interval = 60.0 / max_rpm if max_rpm and max_rpm > 0 else 0.0
+    sleep = _sleep or asyncio.sleep
+    now_fn = _now or time.monotonic
 
-    state: dict = {"stack": None, "session": None, "next_at": 0.0}
+    # Post to the CANONICAL trailing-slash URL. The server mounts the MCP app at
+    # `/mcp` with streamable_http_path="/", so `/mcp` 307-redirects to `/mcp/`.
+    # Following that redirect would send TWO requests per call, and the fixed-window
+    # rate limiter counts both — silently halving the usable request budget.
+    url = base_url if base_url.endswith("/") else base_url + "/"
+
+    if _client is None:
+        import httpx
+        client = httpx.AsyncClient(timeout=httpx.Timeout(60.0), follow_redirects=True)
+    else:
+        client = _client
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    state = {"next_at": 0.0, "id": 0}
     gate = asyncio.Lock()
-
-    async def _ensure() -> ClientSession:
-        if state["session"] is None:
-            stack = AsyncExitStack()
-            read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(base_url, headers={"Authorization": f"Bearer {api_key}"})
-            )
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-            state["stack"], state["session"] = stack, session
-        return state["session"]
-
-    async def _drop_session() -> None:
-        stack = state["stack"]
-        state["stack"], state["session"] = None, None
-        if stack is not None:
-            try:
-                await stack.aclose()
-            except Exception:
-                pass  # the session is already broken; teardown errors are moot
 
     async def _throttle() -> None:
         if min_interval <= 0:
             return
         async with gate:
-            now = time.monotonic()
-            wait = state["next_at"] - now
+            wait = state["next_at"] - now_fn()
             if wait > 0:
-                await asyncio.sleep(wait)
-                now = time.monotonic()
-            state["next_at"] = now + min_interval
+                await sleep(wait)
+            state["next_at"] = now_fn() + min_interval
 
     async def call_tool(name: str, args: dict) -> dict:
-        for attempt in range(4):
+        import httpx
+        for attempt in range(_MAX_ATTEMPTS):
             await _throttle()
+            state["id"] += 1
+            body = {"jsonrpc": "2.0", "id": state["id"], "method": "tools/call",
+                    "params": {"name": name, "arguments": args}}
+            last = attempt >= _MAX_ATTEMPTS - 1
             try:
-                session = await _ensure()
-                result = await session.call_tool(name, args)
-                return _parse_tool_result(result)
-            except Exception as e:  # noqa: BLE001 — classify then re-raise
-                if _is_rate_limited(e) and attempt < 3:
-                    await _drop_session()
-                    await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
-                    continue
-                raise
+                resp = await client.post(url, headers=headers, json=body)
+            except httpx.HTTPError:      # transport error (connect/read/timeout)
+                if last:
+                    raise
+                await sleep(2 ** attempt)
+                continue
+            if resp.status_code == 429 and not last:
+                # Fixed-window per-minute limiter that counts rejected requests too,
+                # so a short retry stays in the saturated window. Wait a full window
+                # for it to reset. (With the /mcp/ fix this should never trigger.)
+                await sleep(_RATE_LIMIT_BACKOFF_S)
+                continue
+            if resp.status_code >= 500 and not last:
+                await sleep(2 ** attempt)  # transient server error
+                continue
+            resp.raise_for_status()
+            return _extract_rpc_result(resp)
         raise RuntimeError("unreachable")
 
     async def aclose() -> None:
-        await _drop_session()
+        await client.aclose()
 
     return call_tool, aclose
