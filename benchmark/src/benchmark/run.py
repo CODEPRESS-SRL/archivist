@@ -72,46 +72,90 @@ async def simulate(dataset, adapters, probes: list[Probe], checkpoint_every: int
     return rows
 
 
-async def main() -> None:
-    import argparse
+async def run_and_write(dataset, probes, *, project, out, checkpoint_every):
+    """Wire the three real adapters against `project`, run the simulation, and
+    persist the rows to `out`. Shared by the real run (`main`) and the synthetic
+    λ-sweep (`sweep.py`). Adapter imports are lazy so unit tests never pull in
+    the MCP/embedding stacks."""
     import os
 
     from benchmark.adapters.archivist import ArchivistAdapter, make_mcp_caller
     from benchmark.adapters.claude_mem import ClaudeMemAdapter, make_claude_mem_caller
     from benchmark.adapters.rag_wiki import RagWikiAdapter
     from benchmark.engine import WriteEngine, make_llm_client
+
+    engine = WriteEngine(make_llm_client())
+    arch_call, arch_close = make_mcp_caller(os.environ["ARCHIVIST_MCP_URL"], os.environ["ARCHIVIST_API_KEY"])
+    cm_call, cm_close = make_claude_mem_caller()
+    adapters = [
+        ArchivistAdapter(call_tool=arch_call, engine=engine, project=project),
+        ClaudeMemAdapter(call_tool=cm_call, engine=engine, tag="archivist-benchmark"),
+        RagWikiAdapter(db_path="results/wiki.db"),
+    ]
+    rows = None
+    try:
+        rows = await simulate(dataset, adapters, probes, checkpoint_every=checkpoint_every)
+    finally:
+        # Persist BEFORE teardown. The streamable-HTTP session can raise
+        # CancelledError while closing (an idle/keep-alive cancel scope fires),
+        # which would otherwise discard a fully-completed run's results. Close is
+        # then best-effort — teardown errors on a session we're discarding are moot.
+        if rows is not None:
+            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+            with open(out, "w", encoding="utf-8") as fh:
+                json.dump(rows, fh, indent=2)
+        for close in (arch_close, cm_close):
+            try:
+                await close()
+            except BaseException:  # noqa: BLE001 — discard teardown noise, keep results
+                pass
+    return rows
+
+
+async def main() -> None:
+    import argparse
+    import os
+
     from benchmark.extract import load_dataset
     from benchmark.probes import load_probes
+    from benchmark.synth import build_run_inputs
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="data/dataset.jsonl")
     ap.add_argument("--probes", default="data/probes.json")
     ap.add_argument("--out", default="results/metrics.json")
+    ap.add_argument("--project", default="benchmark-marketsgazette")
     ap.add_argument("--checkpoint-every", type=int, default=30)
+    # Synthetic long-horizon mode: resample the real dataset over a long timeline
+    # so compaction fires many times per keyword (see docs/2026-07-11-*).
+    ap.add_argument("--synth", action="store_true",
+                    help="build a synthetic long-horizon dataset from --dataset instead of --probes")
+    ap.add_argument("--writes-per-keyword", type=int, default=80)
+    ap.add_argument("--novelty-rate", type=float, default=0.5)
+    ap.add_argument("--revision-rate", type=float, default=0.0)
+    ap.add_argument("--synth-horizon-days", type=int, default=None)
+    ap.add_argument("--synth-seed", type=int, default=0)
+    ap.add_argument("--recent-days", type=int, default=14)
     args = ap.parse_args()
 
     os.makedirs("results", exist_ok=True)
 
-    dataset = load_dataset(args.dataset)
-    probes = load_probes(args.probes)
-    engine = WriteEngine(make_llm_client())
+    if args.synth:
+        dataset, probes = build_run_inputs(
+            load_dataset(args.dataset),
+            recent_days=args.recent_days,
+            writes_per_keyword=args.writes_per_keyword,
+            novelty_rate=args.novelty_rate,
+            revision_rate=args.revision_rate,
+            horizon_days=args.synth_horizon_days,
+            seed=args.synth_seed,
+        )
+    else:
+        dataset = load_dataset(args.dataset)
+        probes = load_probes(args.probes)
 
-    arch_call, arch_close = make_mcp_caller(os.environ["ARCHIVIST_MCP_URL"], os.environ["ARCHIVIST_API_KEY"])
-    cm_call, cm_close = make_claude_mem_caller()
-    adapters = [
-        ArchivistAdapter(call_tool=arch_call, engine=engine, project="benchmark-marketsgazette"),
-        ClaudeMemAdapter(call_tool=cm_call, engine=engine, tag="archivist-benchmark"),
-        RagWikiAdapter(db_path="results/wiki.db"),
-    ]
-    try:
-        rows = await simulate(dataset, adapters, probes, checkpoint_every=args.checkpoint_every)
-    finally:
-        await arch_close()
-        await cm_close()
-
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(rows, fh, indent=2)
+    await run_and_write(dataset, probes, project=args.project, out=args.out,
+                        checkpoint_every=args.checkpoint_every)
 
 
 if __name__ == "__main__":

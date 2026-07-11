@@ -43,6 +43,39 @@ def render_footprint_chart(rows: list[dict], out_path: str) -> None:
     fig.savefig(out_path, dpi=120)
 
 
+def render_lambda_footprint_chart(runs: dict[str, list[dict]], out_path: str) -> None:
+    """Overlay the footprint-over-time trajectory of every adapter across the λ
+    sweep. Archivist gets one line per λ (its approach curve); the baselines
+    (claude-mem plateau, rag-wiki 0) are drawn once from the first run since they
+    are λ-invariant. Makes the footprint↔novelty story readable at a glance."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    baselines_drawn: set[str] = set()
+    for lam in sorted(runs, key=float):
+        rows = runs[lam]
+        by_adapter: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        for r in rows:
+            by_adapter[r["adapter"]].append((r["day"], r["footprint_tokens"]))
+        for name, pts in by_adapter.items():
+            pts.sort()
+            xs, ys = zip(*pts)
+            if name == "archivist":
+                ax.plot(xs, ys, marker="o", label=f"archivist λ={lam}")
+            elif name not in baselines_drawn:
+                ax.plot(xs, ys, marker=".", linestyle="--", label=name)
+                baselines_drawn.add(name)
+
+    ax.set_xlabel("simulated day")
+    ax.set_ylabel("context footprint (tokens)")
+    ax.set_title("Footprint trajectory by novelty rate λ (SYNTHETIC: real corpus resampled)")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+
+
 def main() -> None:
     import argparse
 

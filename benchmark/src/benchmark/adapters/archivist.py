@@ -111,37 +111,100 @@ def _parse_tool_result(result) -> dict:
     return {}
 
 
-def make_mcp_caller(base_url: str, api_key: str):
+def _is_rate_limited(exc: BaseException) -> bool:
+    """True if `exc` (or anything nested in it) is the server's 429/rate-limit.
+
+    A 429 from prod arrives wrapped: httpx `HTTPStatusError` re-raised through
+    anyio's `ExceptionGroup` during the streamable-HTTP session teardown. Walk
+    sub-exceptions and causes so we recognise it wherever it hides."""
+    seen: list[str] = []
+
+    def walk(e: BaseException) -> None:
+        seen.append(str(e))
+        for sub in getattr(e, "exceptions", None) or []:
+            walk(sub)
+        if e.__cause__ is not None:
+            walk(e.__cause__)
+
+    walk(exc)
+    blob = " ".join(seen)
+    return "429" in blob or "Too Many Requests" in blob or "RATE_LIMITED" in blob
+
+
+def make_mcp_caller(base_url: str, api_key: str, *, max_rpm: int | None = None):
     """Build a real Streamable-HTTP tool-caller bound to a persistent session.
 
     Returns (call_tool, aclose). Integration-only: exercised by run.py against
-    the real server, not by unit tests (the JSON-normalization is unit-tested
-    via `_parse_tool_result`).
-    """
+    the real server, not by unit tests (JSON-normalization via `_parse_tool_result`
+    and 429-detection via `_is_rate_limited` are unit-tested).
+
+    The prod server rate-limits per key (default 120/min). The benchmark's
+    checkpoint retrieve-storm bursts far above that, so this caller (a) throttles
+    to a safe rate (env `ARCHIVIST_MAX_RPM`, default 90) with a min-interval gate,
+    and (b) on a 429 tears down the corrupted session, backs off, and retries on a
+    fresh one — a single 429 must not abort a multi-hour sweep."""
+    import asyncio
+    import os
+    import time
     from contextlib import AsyncExitStack
 
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
-    stack = AsyncExitStack()
-    state: dict = {}
+    if max_rpm is None:
+        max_rpm = int(os.environ.get("ARCHIVIST_MAX_RPM", "90"))
+    min_interval = 60.0 / max_rpm if max_rpm and max_rpm > 0 else 0.0
+
+    state: dict = {"stack": None, "session": None, "next_at": 0.0}
+    gate = asyncio.Lock()
 
     async def _ensure() -> ClientSession:
-        if "session" not in state:
+        if state["session"] is None:
+            stack = AsyncExitStack()
             read, write, _ = await stack.enter_async_context(
                 streamablehttp_client(base_url, headers={"Authorization": f"Bearer {api_key}"})
             )
             session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
-            state["session"] = session
+            state["stack"], state["session"] = stack, session
         return state["session"]
 
+    async def _drop_session() -> None:
+        stack = state["stack"]
+        state["stack"], state["session"] = None, None
+        if stack is not None:
+            try:
+                await stack.aclose()
+            except Exception:
+                pass  # the session is already broken; teardown errors are moot
+
+    async def _throttle() -> None:
+        if min_interval <= 0:
+            return
+        async with gate:
+            now = time.monotonic()
+            wait = state["next_at"] - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+                now = time.monotonic()
+            state["next_at"] = now + min_interval
+
     async def call_tool(name: str, args: dict) -> dict:
-        session = await _ensure()
-        result = await session.call_tool(name, args)
-        return _parse_tool_result(result)
+        for attempt in range(4):
+            await _throttle()
+            try:
+                session = await _ensure()
+                result = await session.call_tool(name, args)
+                return _parse_tool_result(result)
+            except Exception as e:  # noqa: BLE001 — classify then re-raise
+                if _is_rate_limited(e) and attempt < 3:
+                    await _drop_session()
+                    await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+                    continue
+                raise
+        raise RuntimeError("unreachable")
 
     async def aclose() -> None:
-        await stack.aclose()
+        await _drop_session()
 
     return call_tool, aclose
