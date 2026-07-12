@@ -411,6 +411,40 @@ async def delete_entry(
     return {"keyword": keyword, "deleted": True}
 
 
+async def delete_fragment(
+    session: AsyncSession, team_id: int, project: str, keyword: str, fragment_id: int
+) -> dict:
+    """Hard-delete a single pending fragment of an active entry. Commits.
+
+    Fragments are append-only event rows with no soft-delete column, so this is
+    a physical DELETE. The ``memory_id`` guard confines the delete to a fragment
+    of *this* entry — no cross-entry or cross-tenant reach. Raises ``NOT_FOUND``
+    if the entry is absent or the fragment does not belong to it.
+    """
+    project = normalize_keyword(project)
+    keyword = normalize_keyword(keyword)
+
+    project_id = await _project_id(session, team_id, project)
+    memory = None if project_id is None else await _active_memory(session, project_id, keyword)
+    if memory is None:
+        raise _not_found(keyword, project)
+
+    result = await session.execute(
+        delete(MemoryFragment).where(
+            MemoryFragment.memory_id == memory.id,
+            MemoryFragment.id == fragment_id,
+        )
+    )
+    if not result.rowcount:
+        await session.rollback()
+        raise ServiceError(
+            errors.NOT_FOUND,
+            f"Fragment {fragment_id} not found for '{keyword}' in project '{project}'.",
+        )
+    await session.commit()
+    return {"keyword": keyword, "fragment_id": fragment_id, "deleted": True}
+
+
 # --- read path -------------------------------------------------------------
 
 
