@@ -23,6 +23,7 @@ from app.services.memory import (
     compact_entry,
     delete_entry,
     delete_fragment,
+    delete_project,
     get_entries,
     list_entries,
 )
@@ -94,12 +95,13 @@ async def logout(
 @admin_router.get("", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
+    msg: str | None = None,
     admin: AdminSession = Depends(require_session),
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     projects = await list_projects(session, admin.team_id)
     return templates.TemplateResponse(
-        request, "dashboard.html", {"admin": admin, "projects": projects}
+        request, "dashboard.html", {"admin": admin, "projects": projects, "msg": msg}
     )
 
 
@@ -122,6 +124,24 @@ async def project_page(
             "msg": msg,
         },
     )
+
+
+@admin_router.post("/projects/{slug}/delete", response_model=None)
+async def project_delete(
+    request: Request,
+    slug: str,
+    csrf: str | None = Form(default=None),
+    admin: AdminSession = Depends(require_session),
+    session: AsyncSession = Depends(get_session),
+) -> PlainTextResponse | RedirectResponse:
+    if not check_csrf(request, csrf):
+        return PlainTextResponse("bad csrf", status_code=400)
+    try:
+        out = await delete_project(session, admin.team_id, slug)
+        msg = f"Deleted project {slug} ({out['entries_removed']} entr(y/ies))."
+    except ServiceError:
+        msg = f"Project {slug} not found."
+    return RedirectResponse(f"/admin?msg={quote(msg, safe='')}", status_code=303)
 
 
 @admin_router.get("/search", response_class=HTMLResponse)
