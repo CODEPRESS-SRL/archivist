@@ -18,7 +18,14 @@ from app.admin.render import render_markdown
 from app.auth import hash_api_key, lookup_auth_context
 from app.config import get_settings
 from app.db import get_session
-from app.services.memory import ServiceError, compact_entry, delete_entry, get_entries, list_entries
+from app.services.memory import (
+    ServiceError,
+    compact_entry,
+    delete_entry,
+    delete_fragment,
+    get_entries,
+    list_entries,
+)
 from app.services.search_entry import run_search
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -213,6 +220,30 @@ async def memory_delete(
         msg = f"{keyword} not found."
     return RedirectResponse(
         f"/admin/projects/{quote(project, safe='')}?msg={quote(msg, safe='')}", status_code=303
+    )
+
+
+@admin_router.post("/memory/{keyword}/fragments/{fragment_id}/delete", response_model=None)
+async def memory_fragment_delete(
+    request: Request,
+    keyword: str,
+    fragment_id: int,
+    project: str,
+    csrf: str | None = Form(default=None),
+    admin: AdminSession = Depends(require_session),
+    session: AsyncSession = Depends(get_session),
+) -> PlainTextResponse | RedirectResponse:
+    if not check_csrf(request, csrf):
+        return PlainTextResponse("bad csrf", status_code=400)
+    try:
+        await delete_fragment(session, admin.team_id, project, keyword, fragment_id)
+        msg = f"Deleted fragment {fragment_id}."
+    except ServiceError:
+        msg = f"Fragment {fragment_id} not found."
+    return RedirectResponse(
+        f"/admin/memory/{quote(keyword, safe='')}"
+        f"?project={quote(project, safe='')}&msg={quote(msg, safe='')}",
+        status_code=303,
     )
 
 
