@@ -60,8 +60,7 @@
   <h2>Danger zone</h2>
   <p>Deleting <strong>{{ slug }}</strong> permanently removes every entry, fragment,
      and history row under it. This cannot be undone.</p>
-  <form method="post" action="/admin/projects/{{ slug }}/delete"
-        onsubmit="return confirm('Permanently delete project {{ slug }} and ALL its data?')">
+  <form id="delete-project-form" method="post" action="/admin/projects/{{ slug }}/delete">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Type <code>{{ slug }}</code> to confirm:
       <input type="text" id="confirm-slug" autocomplete="off">
@@ -71,10 +70,17 @@
 </section>
 <script>
 (function () {
+  var slug = {{ slug|tojson }};
   var input = document.getElementById('confirm-slug');
   var btn = document.getElementById('delete-project-btn');
+  var form = document.getElementById('delete-project-form');
   if (input && btn) input.addEventListener('input', function () {
-    btn.disabled = input.value !== {{ slug|tojson }};
+    btn.disabled = input.value !== slug;
+  });
+  if (form) form.addEventListener('submit', function (e) {
+    if (!confirm('Permanently delete project ' + slug + ' and ALL its data?')) {
+      e.preventDefault();
+    }
   });
 })();
 </script>
