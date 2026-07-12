@@ -445,6 +445,29 @@ async def delete_fragment(
     return {"keyword": keyword, "fragment_id": fragment_id, "deleted": True}
 
 
+async def delete_project(session: AsyncSession, team_id: int, project: str) -> dict:
+    """Hard-delete a project and everything under it (cascade). Commits.
+
+    ``memories.project_id`` has no DB-level cascade to ``projects``, so the
+    memories are deleted first; their ``ondelete=CASCADE`` FKs clear the
+    fragments and history rows. All rows are removed, including soft-deleted
+    entries. Raises ``NOT_FOUND`` if the team has no such project slug.
+    """
+    project = normalize_keyword(project)
+    project_id = await _project_id(session, team_id, project)
+    if project_id is None:
+        raise _not_found(project, project)
+
+    removed = (
+        await session.execute(delete(Memory).where(Memory.project_id == project_id))
+    ).rowcount or 0
+    await session.execute(
+        delete(Project).where(Project.id == project_id, Project.team_id == team_id)
+    )
+    await session.commit()
+    return {"project": project, "deleted": True, "entries_removed": removed}
+
+
 # --- read path -------------------------------------------------------------
 
 
