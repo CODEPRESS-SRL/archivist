@@ -142,6 +142,24 @@ async def _active_memory(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def _memory_including_deleted(
+    session: AsyncSession, project_id: int, keyword: str
+) -> Memory | None:
+    """The newest generation of a keyword, active or soft-deleted.
+
+    ``create_entry`` renames older soft-deleted generations aside to
+    ``kw#deleted#<id>`` before inserting the new row, so at most one row is ever
+    named exactly ``keyword`` and it is always the newest. Dropping the
+    ``deleted_at`` filter is therefore enough to reach a pruned entry — no
+    prefix matching, and ``scalar_one_or_none`` stays valid.
+    """
+    return (
+        await session.execute(
+            select(Memory).where(Memory.project_id == project_id, Memory.keyword == keyword)
+        )
+    ).scalar_one_or_none()
+
+
 # --- write path ------------------------------------------------------------
 
 
@@ -531,26 +549,33 @@ async def get_history(
     project: str,
     keyword: str,
     limit: int = 5,
+    include_deleted: bool = False,
 ) -> dict:
     """Return the newest ``limit`` recorded versions of an entry.
 
-    Read-only. History rows are written by ``create_entry`` and ``compact_entry``
-    and are never mutated, so this is the audit trail that makes compaction
-    reversible for the agent that performed it.
+    Read-only. ``include_deleted=True`` also reaches a soft-deleted (pruned)
+    entry — the reason the forgetting policy can ask an agent to drop content at
+    all: nothing it drops is unrecoverable.
     """
     project = normalize_keyword(project)
     keyword = normalize_keyword(keyword)
 
     project_id = await _project_id(session, team_id, project)
-    memory = None if project_id is None else await _active_memory(session, project_id, keyword)
-    if memory is None:
+    if project_id is None:
+        raise _not_found(keyword, project)
+    entry = (
+        await _memory_including_deleted(session, project_id, keyword)
+        if include_deleted
+        else await _active_memory(session, project_id, keyword)
+    )
+    if entry is None:
         raise _not_found(keyword, project)
 
     rows = (
         (
             await session.execute(
                 select(MemoryHistory)
-                .where(MemoryHistory.memory_id == memory.id)
+                .where(MemoryHistory.memory_id == entry.id)
                 .order_by(MemoryHistory.version.desc())
                 .limit(limit)
             )
@@ -560,6 +585,7 @@ async def get_history(
     )
     return {
         "keyword": keyword,
+        "deleted": entry.deleted_at is not None,
         "versions": [
             {
                 "version": row.version,

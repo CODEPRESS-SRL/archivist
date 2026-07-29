@@ -592,3 +592,52 @@ async def test_get_history_is_tenant_scoped(team_id: int) -> None:
         async with app_db.SessionFactory() as s:
             await memory.get_history(s, other_team_id, PROJECT, "kw")
     assert exc.value.code == errors.NOT_FOUND
+
+
+async def test_get_history_refuses_a_pruned_entry_by_default(team_id: int) -> None:
+    await _create(team_id, "kw", "v1 body")
+    async with app_db.SessionFactory() as s:
+        await delete_entry(s, team_id, PROJECT, "kw", OWNER)
+
+    with pytest.raises(ServiceError) as exc:
+        async with app_db.SessionFactory() as s:
+            await memory.get_history(s, team_id, PROJECT, "kw")
+    assert exc.value.code == errors.NOT_FOUND
+
+
+async def test_get_history_reads_a_pruned_entry_when_asked(team_id: int) -> None:
+    await _create(team_id, "kw", "v1 body")
+    async with app_db.SessionFactory() as s:
+        await delete_entry(s, team_id, PROJECT, "kw", OWNER)
+
+    async with app_db.SessionFactory() as s:
+        result = await memory.get_history(s, team_id, PROJECT, "kw", include_deleted=True)
+
+    assert result["deleted"] is True
+    assert result["versions"][0]["content"] == "v1 body"
+
+
+async def test_get_history_reads_the_newest_generation_after_reuse(team_id: int) -> None:
+    """create -> delete -> create renames the old row aside, so exactly one row
+    is named `kw`. Without that rename this lookup would raise
+    MultipleResultsFound — which is what this test guards."""
+    await _create(team_id, "kw", "old body")
+    async with app_db.SessionFactory() as s:
+        await delete_entry(s, team_id, PROJECT, "kw", OWNER)
+    await _create(team_id, "kw", "new body")
+
+    async with app_db.SessionFactory() as s:
+        result = await memory.get_history(s, team_id, PROJECT, "kw", include_deleted=True)
+
+    assert result["deleted"] is False
+    assert result["versions"][0]["content"] == "new body"
+
+
+async def test_get_history_active_entry_is_unchanged(team_id: int) -> None:
+    await _create(team_id, "kw", "v1 body")
+
+    async with app_db.SessionFactory() as s:
+        result = await memory.get_history(s, team_id, PROJECT, "kw")
+
+    assert result["deleted"] is False
+    assert [v["version"] for v in result["versions"]] == [1]

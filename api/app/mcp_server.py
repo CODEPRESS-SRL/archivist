@@ -412,13 +412,19 @@ def build_mcp() -> FastMCP:
             "Read the recorded version history of an entry (newest first): the "
             "content as it stood at each version, who wrote it, and when. Use it "
             "after a compaction to check what the merge dropped, or to recover "
-            "wording that was compressed away. Read-only — it never changes state."
+            "wording that was compressed away. Read-only — it never changes state. "
+            "Pass include_deleted=true to read the history of a PRUNED entry — that is how "
+            "you check, or recover, what a forgetting sweep dropped."
         )
     )
-    async def memory_history(project: str, keyword: str, limit: int = 5) -> dict:
+    async def memory_history(
+        project: str, keyword: str, limit: int = 5, include_deleted: bool = False
+    ) -> dict:
         async def _do(session: AsyncSession) -> dict:
             team_id, _ = _team()
-            return await memory_svc.get_history(session, team_id, project, keyword, limit)
+            return await memory_svc.get_history(
+                session, team_id, project, keyword, limit, include_deleted
+            )
 
         return await _run("memory_history", _do, project=project, keyword=keyword)
 

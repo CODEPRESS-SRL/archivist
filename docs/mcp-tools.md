@@ -21,7 +21,7 @@ team, resolved from the Bearer key — never from a parameter.
 | [`memory_upsert`](#memory_upsert) | `project, keyword, content, expected_version?, last_fragment_id?` | Create an entry, or write a compaction result |
 | [`memory_list`](#memory_list) | `project` | List every keyword in a project |
 | [`memory_delete`](#memory_delete) | `project, keyword` | Soft-delete an entry (history preserved) |
-| [`memory_history`](#memory_history) | `project, keyword, limit=5` | Read an entry's recorded version history (newest first) |
+| [`memory_history`](#memory_history) | `project, keyword, limit=5, include_deleted=False` | Read an entry's recorded version history (newest first) |
 
 ---
 
@@ -157,17 +157,22 @@ Soft-delete an entry; history is preserved.
 Read the recorded version history of an entry (newest first): the content as
 it stood at each version, who wrote it, and when. Use it after a compaction to
 check what the merge dropped, or to recover wording that was compressed away.
-Read-only — it never changes state.
+Read-only — it never changes state. Pass `include_deleted=true` to read the
+history of a PRUNED entry — that is how you check, or recover, what a
+forgetting sweep dropped.
 
 **Parameters**
 
 - `project` (str)
 - `keyword` (str)
 - `limit` (int, default 5) — max number of versions to return, newest first.
+- `include_deleted` (bool, default `False`) — when `True`, also reaches a
+  soft-deleted (pruned) entry.
 
-**Returns** — `keyword` and `versions`, a list (newest first) of `{version,
-content, updated_by, created_at, token_count}`. Raises `NOT_FOUND` if there is
-no active entry for the keyword.
+**Returns** — `keyword`, `deleted` (bool — whether the entry is soft-deleted),
+and `versions`, a list (newest first) of `{version, content, updated_by,
+created_at, token_count}`. Raises `NOT_FOUND` if there is no matching entry
+(no active entry, unless `include_deleted=true` also reaches a pruned one).
 
 ---
 
