@@ -15,6 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app import db as app_db
+from app import errors
 from app.auth import create_team
 from app.config import get_settings
 from app.models import Memory, MemoryHistory
@@ -563,3 +564,31 @@ async def test_get_entries_carries_age_days_and_fragment_count(team_id: int) -> 
     entry = out["entries"][0]
     assert entry["age_days"] == 0
     assert entry["fragment_count"] == 0
+
+
+# --- get_history -------------------------------------------------------------
+
+
+async def test_get_history_returns_versions_newest_first(team_id: int) -> None:
+    await _create(team_id, "kw", "v1 body")
+    async with app_db.SessionFactory() as s:
+        await compact_entry(s, team_id, PROJECT, "kw", "v2 body", 1, None, OWNER)
+
+    async with app_db.SessionFactory() as s:
+        result = await memory.get_history(s, team_id, PROJECT, "kw")
+
+    assert [v["version"] for v in result["versions"]] == [2, 1]
+    assert result["versions"][0]["content"] == "v2 body"
+    assert result["versions"][0]["updated_by"] == OWNER
+    assert result["versions"][0]["token_count"] == count_tokens("v2 body")
+
+
+async def test_get_history_is_tenant_scoped(team_id: int) -> None:
+    await _create(team_id, "kw", "v1 body")
+    async with app_db.SessionFactory() as s:
+        other_team_id = await create_team(s, "other-co")
+
+    with pytest.raises(ServiceError) as exc:
+        async with app_db.SessionFactory() as s:
+            await memory.get_history(s, other_team_id, PROJECT, "kw")
+    assert exc.value.code == errors.NOT_FOUND

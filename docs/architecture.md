@@ -195,6 +195,6 @@ unavailable. The same threshold and column back the read-only
 ## See also
 
 - [concepts.md](concepts.md) — the refine → append → compaction → retrieve cycle
-- [mcp-tools.md](mcp-tools.md) — the six tools, signatures, and error codes
+- [mcp-tools.md](mcp-tools.md) — the seven tools, signatures, and error codes
 - [self-hosting.md](self-hosting.md) — deploy, configure, administer, back up
 - [../SECURITY.md](../SECURITY.md) — threat model and controls

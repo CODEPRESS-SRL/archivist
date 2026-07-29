@@ -176,7 +176,7 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full dev setup.
 | Guide | What's inside |
 |---|---|
 | **[Core concepts](docs/concepts.md)** | The memory cycle, namespacing, caps |
-| **[MCP tools](docs/mcp-tools.md)** | The six tools + error codes |
+| **[MCP tools](docs/mcp-tools.md)** | The seven tools + error codes |
 | **[Architecture](docs/architecture.md)** | Components, schema, design decisions |
 | **[Self-hosting](docs/self-hosting.md)** | Deploy, configure, administer, back up |
 | **[Runbook](RUNBOOK.md)** | Incident response |

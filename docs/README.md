@@ -8,7 +8,7 @@ for coding agents.
 - **[Core concepts](concepts.md)** — the refine → append → compaction →
   retrieve cycle, project namespacing, keyword normalization, caps and
   backpressure. Start here to understand *how the memory works*.
-- **[MCP tools reference](mcp-tools.md)** — the six tools (signatures,
+- **[MCP tools reference](mcp-tools.md)** — the seven tools (signatures,
   parameters, return contract) and the error codes.
 
 ## For operators

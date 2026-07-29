@@ -1,4 +1,4 @@
-"""End-to-end tests for the MCP server and its six tools (T1.5).
+"""End-to-end tests for the MCP server and its seven tools (T1.5).
 
 These drive the real MCP SDK streamable-HTTP client against the ASGI app
 in-process (the client runs on an httpx ``ASGITransport``), so the auth
@@ -6,7 +6,7 @@ middleware, the mounted FastMCP endpoint and the service layer are all exercised
 together. A real API key is created in the container DB and passed as the Bearer
 token, so the ``updated_by`` / ``created_by`` team attribution flows end to end.
 
-Covers the DoD: ``tools/list`` shows the six tools; the
+Covers the DoD: ``tools/list`` shows the seven tools; the
 search→upsert(create)→append→get→upsert(compact) cycle; cross-project
 ``scope="all"``; a call without Bearer → HTTP 401 (not an MCP error); a tool call
 on a new project creates it in ``projects``; every service rejection comes back
@@ -92,10 +92,11 @@ _EXPECTED_TOOLS = {
     "memory_upsert",
     "memory_list",
     "memory_delete",
+    "memory_history",
 }
 
 
-async def test_tools_list_shows_the_six_tools(db_engine: object) -> None:
+async def test_tools_list_shows_the_seven_tools(db_engine: object) -> None:
     app = create_app()
     token = await _new_key()
     async with _client_session(app, token) as session:
@@ -823,3 +824,30 @@ async def test_upsert_create_degrades_when_dedup_lookup_fails(
         result = await _call(session, "memory_upsert", project="p", keyword="solo", content="x")
     assert result["created"] is True
     assert "near_duplicates" not in result
+
+
+# --- memory_history ----------------------------------------------------------
+
+
+async def test_memory_history_tool_returns_versions(db_engine: object) -> None:
+    token = await _new_key()
+    app = create_app()
+    async with _client_session(app, token) as session:
+        await _call(session, "memory_upsert", project="proj", keyword="kw", content="v1")
+        await _call(
+            session, "memory_upsert",
+            project="proj", keyword="kw", content="v2", expected_version=1,
+        )
+
+        payload = await _call(session, "memory_history", project="proj", keyword="kw")
+
+    assert [v["version"] for v in payload["versions"]] == [2, 1]
+
+
+async def test_memory_history_unknown_keyword_is_not_found(db_engine: object) -> None:
+    token = await _new_key()
+    app = create_app()
+    async with _client_session(app, token) as session:
+        payload = await _call(session, "memory_history", project="proj", keyword="nope")
+
+    assert payload["error"]["code"] == "NOT_FOUND"

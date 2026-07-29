@@ -525,6 +525,54 @@ async def get_entries(
     return {"entries": entries, "not_found": not_found}
 
 
+async def get_history(
+    session: AsyncSession,
+    team_id: int,
+    project: str,
+    keyword: str,
+    limit: int = 5,
+) -> dict:
+    """Return the newest ``limit`` recorded versions of an entry.
+
+    Read-only. History rows are written by ``create_entry`` and ``compact_entry``
+    and are never mutated, so this is the audit trail that makes compaction
+    reversible for the agent that performed it.
+    """
+    project = normalize_keyword(project)
+    keyword = normalize_keyword(keyword)
+
+    project_id = await _project_id(session, team_id, project)
+    memory = None if project_id is None else await _active_memory(session, project_id, keyword)
+    if memory is None:
+        raise _not_found(keyword, project)
+
+    rows = (
+        (
+            await session.execute(
+                select(MemoryHistory)
+                .where(MemoryHistory.memory_id == memory.id)
+                .order_by(MemoryHistory.version.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "keyword": keyword,
+        "versions": [
+            {
+                "version": row.version,
+                "content": row.content,
+                "updated_by": row.updated_by,
+                "created_at": row.created_at,
+                "token_count": count_tokens(row.content),
+            }
+            for row in rows
+        ],
+    }
+
+
 async def count_pending_fragments(
     session: AsyncSession, team_id: int, project: str, keyword: str
 ) -> int:

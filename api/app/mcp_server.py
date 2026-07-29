@@ -1,7 +1,7 @@
-"""Remote MCP server: the six memory tools on ``/mcp`` (T1.5).
+"""Remote MCP server: the seven memory tools on ``/mcp`` (T1.5).
 
-``build_mcp()`` returns a ``FastMCP(stateless_http=True)`` instance with the six
-tools registered; ``create_app`` (``app.main``) mounts its
+``build_mcp()`` returns a ``FastMCP(stateless_http=True)`` instance with the
+seven tools registered; ``create_app`` (``app.main``) mounts its
 ``streamable_http_app()`` on ``/mcp`` behind the T1.2 Bearer auth middleware and
 runs its session manager in the app lifespan. A fresh instance is built per app
 because ``StreamableHTTPSessionManager.run()`` is one-shot per instance.
@@ -192,7 +192,7 @@ async def _run(
 
 
 def build_mcp() -> FastMCP:
-    """Build a FastMCP server with the six tools registered."""
+    """Build a FastMCP server with the seven tools registered."""
     mcp = FastMCP(
         name="archivist",
         instructions=_INSTRUCTIONS,
@@ -406,5 +406,20 @@ def build_mcp() -> FastMCP:
             return await memory_svc.delete_entry(session, team_id, project, keyword, team_name)
 
         return await _run("memory_delete", _do, project=project, keyword=keyword)
+
+    @mcp.tool(
+        description=(
+            "Read the recorded version history of an entry (newest first): the "
+            "content as it stood at each version, who wrote it, and when. Use it "
+            "after a compaction to check what the merge dropped, or to recover "
+            "wording that was compressed away. Read-only — it never changes state."
+        )
+    )
+    async def memory_history(project: str, keyword: str, limit: int = 5) -> dict:
+        async def _do(session: AsyncSession) -> dict:
+            team_id, _ = _team()
+            return await memory_svc.get_history(session, team_id, project, keyword, limit)
+
+        return await _run("memory_history", _do, project=project, keyword=keyword)
 
     return mcp

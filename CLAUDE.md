@@ -43,7 +43,7 @@ The refine→append→compaction protocol lives in the MCP instructions and
 in the tool descriptions.
 
 Tools: `memory_search`, `memory_get`, `memory_append`, `memory_upsert`,
-`memory_list`, `memory_delete`. Signatures and semantics are in
+`memory_list`, `memory_delete`, `memory_history`. Signatures and semantics are in
 [docs/mcp-tools.md](docs/mcp-tools.md) — do not invent parameters or tables
 not defined there.
 

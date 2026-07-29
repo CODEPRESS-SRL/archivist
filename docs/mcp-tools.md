@@ -1,6 +1,6 @@
 # MCP tools reference
 
-Archivist exposes **six tools** over a single Streamable-HTTP MCP endpoint at
+Archivist exposes **seven tools** over a single Streamable-HTTP MCP endpoint at
 `/mcp`. Every MCP client receives the protocol (the refine → append →
 compaction → retrieve cycle) in the `initialize` handshake; see
 [concepts.md](concepts.md). This page is the contract: parameters, returns, and
@@ -21,6 +21,7 @@ team, resolved from the Bearer key — never from a parameter.
 | [`memory_upsert`](#memory_upsert) | `project, keyword, content, expected_version?, last_fragment_id?` | Create an entry, or write a compaction result |
 | [`memory_list`](#memory_list) | `project` | List every keyword in a project |
 | [`memory_delete`](#memory_delete) | `project, keyword` | Soft-delete an entry (history preserved) |
+| [`memory_history`](#memory_history) | `project, keyword, limit=5` | Read an entry's recorded version history (newest first) |
 
 ---
 
@@ -148,6 +149,25 @@ Soft-delete an entry; history is preserved.
 **Parameters** — `project` (str), `keyword` (str).
 
 **Returns** — `deleted=true`, or `NOT_FOUND` if the keyword is not present.
+
+---
+
+### `memory_history`
+
+Read the recorded version history of an entry (newest first): the content as
+it stood at each version, who wrote it, and when. Use it after a compaction to
+check what the merge dropped, or to recover wording that was compressed away.
+Read-only — it never changes state.
+
+**Parameters**
+
+- `project` (str)
+- `keyword` (str)
+- `limit` (int, default 5) — max number of versions to return, newest first.
+
+**Returns** — `keyword` and `versions`, a list (newest first) of `{version,
+content, updated_by, created_at, token_count}`. Raises `NOT_FOUND` if there is
+no active entry for the keyword.
 
 ---
 
