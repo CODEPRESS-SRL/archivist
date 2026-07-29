@@ -641,3 +641,17 @@ async def test_get_history_active_entry_is_unchanged(team_id: int) -> None:
 
     assert result["deleted"] is False
     assert [v["version"] for v in result["versions"]] == [1]
+
+
+async def test_get_history_clamps_negative_limit(team_id: int) -> None:
+    """An unvalidated negative ``limit`` reaches Postgres as ``LIMIT -1``, which
+    raises ``DataError`` — an unhandled raw exception instead of an Appendix C
+    envelope. It must be clamped to a usable value instead of raising."""
+    await _create(team_id, "kw", "v1 body")
+    async with app_db.SessionFactory() as s:
+        await compact_entry(s, team_id, PROJECT, "kw", "v2 body", 1, None, OWNER)
+
+    async with app_db.SessionFactory() as s:
+        result = await memory.get_history(s, team_id, PROJECT, "kw", limit=-1)
+
+    assert result["versions"], "a negative limit must clamp, not raise"

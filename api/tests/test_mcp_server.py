@@ -851,3 +851,34 @@ async def test_memory_history_unknown_keyword_is_not_found(db_engine: object) ->
         payload = await _call(session, "memory_history", project="proj", keyword="nope")
 
     assert payload["error"]["code"] == "NOT_FOUND"
+
+
+async def test_memory_history_include_deleted_recovers_pruned_content(
+    db_engine: object,
+) -> None:
+    """The whole point of include_deleted is that an agent, over MCP, can
+    recover content a forgetting sweep pruned. Cover both sides of the flag:
+    default omitted -> NOT_FOUND for the pruned keyword; include_deleted=True
+    -> the original content comes back."""
+    token = await _new_key()
+    app = create_app()
+    async with _client_session(app, token) as session:
+        await _call(
+            session, "memory_upsert", project="proj", keyword="pruned-kw", content="original body"
+        )
+        await _call(session, "memory_delete", project="proj", keyword="pruned-kw")
+
+        default_payload = await _call(
+            session, "memory_history", project="proj", keyword="pruned-kw"
+        )
+        recovered = await _call(
+            session,
+            "memory_history",
+            project="proj",
+            keyword="pruned-kw",
+            include_deleted=True,
+        )
+
+    assert default_payload["error"]["code"] == "NOT_FOUND"
+    assert recovered["deleted"] is True
+    assert recovered["versions"][0]["content"] == "original body"

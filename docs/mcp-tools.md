@@ -21,7 +21,7 @@ team, resolved from the Bearer key — never from a parameter.
 | [`memory_upsert`](#memory_upsert) | `project, keyword, content, expected_version?, last_fragment_id?` | Create an entry, or write a compaction result |
 | [`memory_list`](#memory_list) | `project` | List every keyword in a project |
 | [`memory_delete`](#memory_delete) | `project, keyword` | Soft-delete an entry (history preserved) |
-| [`memory_history`](#memory_history) | `project, keyword, limit=5, include_deleted=False` | Read an entry's recorded version history (newest first) |
+| [`memory_history`](#memory_history) | `project, keyword, limit=5, include_deleted=false` | Read an entry's recorded version history (newest first) |
 
 ---
 
@@ -159,20 +159,25 @@ it stood at each version, who wrote it, and when. Use it after a compaction to
 check what the merge dropped, or to recover wording that was compressed away.
 Read-only — it never changes state. Pass `include_deleted=true` to read the
 history of a PRUNED entry — that is how you check, or recover, what a
-forgetting sweep dropped.
+forgetting sweep dropped. This reaches only the **newest generation** of the
+keyword: if a pruned entry's keyword was later re-created, the older,
+soft-deleted generation is renamed aside (`kw#deleted#<id>`) and its history is
+not reachable over MCP.
 
 **Parameters**
 
 - `project` (str)
 - `keyword` (str)
-- `limit` (int, default 5) — max number of versions to return, newest first.
-- `include_deleted` (bool, default `False`) — when `True`, also reaches a
+- `limit` (int, default 5) — max number of versions to return, newest first;
+  clamped to `[1, 50]`.
+- `include_deleted` (bool, default `false`) — when `true`, also reaches a
   soft-deleted (pruned) entry.
 
 **Returns** — `keyword`, `deleted` (bool — whether the entry is soft-deleted),
 and `versions`, a list (newest first) of `{version, content, updated_by,
-created_at, token_count}`. Raises `NOT_FOUND` if there is no matching entry
-(no active entry, unless `include_deleted=true` also reaches a pruned one).
+created_at, token_count}`. Raises `NOT_FOUND` if the keyword doesn't resolve to
+an entry: an active entry when `include_deleted` is omitted or `false`; either
+an active or a pruned entry when `include_deleted=true`.
 
 ---
 

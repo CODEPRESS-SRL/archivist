@@ -423,9 +423,15 @@ def build_mcp() -> FastMCP:
         async def _do(session: AsyncSession) -> dict:
             team_id, _ = _team()
             return await memory_svc.get_history(
-                session, team_id, project, keyword, limit, include_deleted
+                session, team_id, project, keyword, limit=limit, include_deleted=include_deleted
             )
 
-        return await _run("memory_history", _do, project=project, keyword=keyword)
+        return await _run(
+            "memory_history",
+            _do,
+            project=project,
+            keyword=keyword,
+            audit_fields={"include_deleted": include_deleted},
+        )
 
     return mcp

@@ -543,6 +543,13 @@ async def get_entries(
     return {"entries": entries, "not_found": not_found}
 
 
+# memory_history ceiling: a negative limit reaches Postgres as `LIMIT -1` (a raw
+# DataError, not an Appendix C envelope), and an unbounded limit could return N
+# *full* historical contents (each up to the 10000-token hard cap) in one
+# payload. Clamped, not rejected — a bad limit is not the agent's fault.
+MAX_HISTORY_LIMIT = 50
+
+
 async def get_history(
     session: AsyncSession,
     team_id: int,
@@ -555,10 +562,12 @@ async def get_history(
 
     Read-only. ``include_deleted=True`` also reaches a soft-deleted (pruned)
     entry — the reason the forgetting policy can ask an agent to drop content at
-    all: nothing it drops is unrecoverable.
+    all: nothing it drops is unrecoverable. ``limit`` is clamped to
+    ``[1, MAX_HISTORY_LIMIT]``.
     """
     project = normalize_keyword(project)
     keyword = normalize_keyword(keyword)
+    limit = max(1, min(limit, MAX_HISTORY_LIMIT))
 
     project_id = await _project_id(session, team_id, project)
     if project_id is None:

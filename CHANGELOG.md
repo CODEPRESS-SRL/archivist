@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`memory_history` tool.** Read an entry's recorded version history (newest
+  first): the content as it stood at each version, who wrote it, and when.
+  Read-only — it never changes state. Use it after a compaction to check what
+  the merge dropped, or to recover wording that was compressed away.
+- **`include_deleted` on `memory_history`.** Pass `include_deleted=true` to
+  read the history of a soft-deleted (pruned) entry — the newest generation of
+  a keyword only. This is how an agent checks, or recovers, what a forgetting
+  sweep dropped.
+
 ### Changed
 
 - **Three-tier entry size model.** The compaction/sweep trigger is decoupled

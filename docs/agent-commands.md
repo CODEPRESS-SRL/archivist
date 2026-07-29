@@ -21,6 +21,7 @@ handshake; you rarely call them by hand. Full contract: [docs/mcp-tools.md](mcp-
 | `memory_upsert` | Create a keyword, or write a compacted value (optimistic lock). |
 | `memory_list` | List a project's keywords to orient. |
 | `memory_delete` | Remove a keyword. |
+| `memory_history` | Read an entry's recorded versions; `include_deleted` reaches a pruned entry. |
 
 ## Claude Code companion
 
