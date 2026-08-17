@@ -17,6 +17,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a keyword only. This is how an agent checks, or recovers, what a forgetting
   sweep dropped.
 
+### Fixed
+
+- **Parameter-name aliases on `memory_append` and `memory_get`.** The two
+  tools whose parameter name differs from the rest of the surface were the
+  only source of malformed calls in the field: agents carry `content` over
+  from `memory_upsert` to `memory_append`, and write the singular `keyword`
+  on `memory_get`. Both spellings are now accepted (`content` → `fragment`,
+  `keyword` → `keywords`), and a call carrying neither returns an actionable
+  `VALIDATION_ERROR` instead of a raw pydantic validation exception.
+
 ### Changed
 
 - **Three-tier entry size model.** The compaction/sweep trigger is decoupled

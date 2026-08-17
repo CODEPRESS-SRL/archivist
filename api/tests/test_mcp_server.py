@@ -222,6 +222,100 @@ async def test_memory_get_accepts_a_bare_string_keyword(
         assert by_string == by_list
 
 
+async def test_memory_get_accepts_keyword_as_an_alias_for_keywords(
+    db_engine: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Every other tool names the parameter ``keyword`` (singular), so agents
+    # routinely call memory_get with ``keyword=`` too. Accept it as an alias:
+    # a wrong-name call used to fail as a raw pydantic validation error.
+    from app import mcp_server
+    from tests.fakes import FakeEmbedder
+
+    monkeypatch.setattr(mcp_server, "_get_embedder", lambda: FakeEmbedder())
+
+    app = create_app()
+    token = await _new_key()
+    project, keyword = "archivist", "design-system"
+
+    async with _client_session(app, token) as session:
+        await _call(session, "memory_upsert", project=project, keyword=keyword, content="base")
+
+        by_alias = await _call(session, "memory_get", project=project, keyword=keyword)
+        by_canonical = await _call(session, "memory_get", project=project, keywords=[keyword])
+
+        assert by_alias == by_canonical
+        assert by_alias["entries"][0]["keyword"] == keyword
+
+
+async def test_memory_get_without_any_keyword_is_a_validation_error(db_engine: object) -> None:
+    app = create_app()
+    token = await _new_key()
+
+    async with _client_session(app, token) as session:
+        result = await _call(session, "memory_get", project="archivist")
+
+    assert result["error"]["code"] == "VALIDATION_ERROR"
+    assert "keywords" in result["error"]["message"]
+
+
+async def test_memory_get_with_an_explicit_empty_list_still_reads_nothing(
+    db_engine: object,
+) -> None:
+    # Accepting the alias must not turn an explicit empty list — which has
+    # always meant "nothing to read" — into a rejection.
+    app = create_app()
+    token = await _new_key()
+
+    async with _client_session(app, token) as session:
+        result = await _call(session, "memory_get", project="archivist", keywords=[])
+
+    assert result == {"entries": [], "not_found": []}
+
+
+# --- memory_append accepts `content` as an alias for `fragment` ------------
+
+
+async def test_memory_append_accepts_content_as_an_alias_for_fragment(
+    db_engine: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # memory_upsert names its payload ``content``, so agents carry that name
+    # over to memory_append — by far the most common malformed call in the
+    # field. Accept it as an alias for ``fragment``.
+    from app import mcp_server
+    from tests.fakes import FakeEmbedder
+
+    monkeypatch.setattr(mcp_server, "_get_embedder", lambda: FakeEmbedder())
+
+    app = create_app()
+    token = await _new_key()
+    project, keyword = "archivist", "design-system"
+
+    async with _client_session(app, token) as session:
+        await _call(session, "memory_upsert", project=project, keyword=keyword, content="base")
+
+        appended = await _call(
+            session, "memory_append", project=project, keyword=keyword, content="via alias"
+        )
+        assert appended["fragment_id"] > 0
+
+        got = await _call(session, "memory_get", project=project, keywords=[keyword])
+
+    assert [f["content"] for f in got["entries"][0]["fragments"]] == ["via alias"]
+
+
+async def test_memory_append_without_fragment_or_content_is_a_validation_error(
+    db_engine: object,
+) -> None:
+    app = create_app()
+    token = await _new_key()
+
+    async with _client_session(app, token) as session:
+        result = await _call(session, "memory_append", project="archivist", keyword="design-system")
+
+    assert result["error"]["code"] == "VALIDATION_ERROR"
+    assert "fragment" in result["error"]["message"]
+
+
 # --- cross-project scope ---------------------------------------------------
 
 

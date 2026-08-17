@@ -95,6 +95,22 @@ def version_conflict(expected: int, current: int) -> str:
 # --- validation messages (VALIDATION_ERROR — not in Appendix C) -------------
 
 
+def missing_keywords() -> str:
+    """``memory_get`` called with neither ``keywords`` nor its ``keyword`` alias."""
+    return (
+        'No keyword to read. Pass keywords=["your-keyword"] (a bare string and '
+        "the singular keyword= are accepted too), then retry memory_get."
+    )
+
+
+def missing_fragment() -> str:
+    """``memory_append`` called with neither ``fragment`` nor its ``content`` alias."""
+    return (
+        'No fragment to append. Pass fragment="<your refined fragment>" '
+        "(content= is accepted as an alias), then retry memory_append."
+    )
+
+
 def pending_fragments() -> str:
     """Compaction (``memory_upsert`` with ``expected_version``) omitted
     ``last_fragment_id`` while fragments are pending: it would orphan them."""

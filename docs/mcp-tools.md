@@ -59,7 +59,9 @@ Read entries by keyword.
 - `project` (str)
 - `keywords` (str | list[str]) — one or more keywords to read. A single
   keyword may be passed as a bare string (`"design-system"`) or a list
-  (`["design-system"]`); both are accepted.
+  (`["design-system"]`); both are accepted. The singular `keyword` is
+  accepted as an alias (every other tool spells it that way), so a call
+  naming either parameter works.
 
 **Returns** — for each found keyword: base `content`, pending `fragments`,
 `fragment_count`, `version`, `last_fragment_id`, `compaction_due`,
@@ -82,7 +84,8 @@ a keyword exists. Never blocks, never conflicts.
 - `project` (str)
 - `keyword` (str) — must already exist (else `NOT_FOUND`; create with
   `memory_upsert`).
-- `fragment` (str) — refined, ≤ 500 tokens.
+- `fragment` (str) — refined, ≤ 500 tokens. `content` (the name
+  `memory_upsert` uses for the same payload) is accepted as an alias.
 
 **Returns** — the append result, including `compaction_due`. When it is `true`,
 the entry crossed the threshold: read it with `memory_get` and compact via

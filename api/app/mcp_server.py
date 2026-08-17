@@ -274,15 +274,26 @@ def build_mcp() -> FastMCP:
             "the base and all fragments into one refined content and call "
             "memory_upsert with the returned expected_version and last_fragment_id. "
             'keywords takes a list, e.g. keywords=["design-system"]; a single '
-            'keyword may also be passed as a bare string, e.g. keywords="design-system".'
+            'keyword may also be passed as a bare string, e.g. keywords="design-system", '
+            "and the singular keyword= is accepted as an alias."
         )
     )
-    async def memory_get(project: str, keywords: str | list[str]) -> dict:
-        # Agents routinely pass a single keyword as a scalar. Accept both shapes
-        # so the common case is never a malformed call; normalize to a list here.
-        kw_list = [keywords] if isinstance(keywords, str) else list(keywords)
+    async def memory_get(
+        project: str,
+        keywords: str | list[str] | None = None,
+        keyword: str | None = None,
+    ) -> dict:
+        # Agents routinely pass a single keyword as a scalar, and — since every
+        # other tool takes ``keyword`` — under the singular name. Accept all
+        # three shapes so the common case is never a malformed call.
+        raw = keywords if keywords is not None else keyword
+        kw_list = [raw] if isinstance(raw, str) else list(raw) if raw is not None else []
 
         async def _do(session: AsyncSession) -> dict:
+            # Only a call that named neither parameter is a mistake; an explicit
+            # empty list keeps its previous meaning (nothing to read).
+            if raw is None:
+                raise ValueError(errors.missing_keywords())
             team_id, _ = _team()
             return await memory_svc.get_entries(session, team_id, project, kw_list)
 
@@ -294,14 +305,26 @@ def build_mcp() -> FastMCP:
             "path once a keyword exists. Never blocks, never conflicts. When the "
             "response has compaction_due=true the entry crossed the threshold: "
             "read it with memory_get and compact it via memory_upsert. If the "
-            "keyword does not exist yet, create it with memory_upsert instead."
+            "keyword does not exist yet, create it with memory_upsert instead. "
+            "The fragment goes in fragment= (content=, the name memory_upsert "
+            "uses, is accepted as an alias)."
         )
     )
-    async def memory_append(project: str, keyword: str, fragment: str) -> dict:
+    async def memory_append(
+        project: str,
+        keyword: str,
+        fragment: str | None = None,
+        content: str | None = None,
+    ) -> dict:
         team_id, team_name = _team()
+        # memory_upsert names the same payload ``content``; agents carry that
+        # name over. Accept it rather than rejecting an otherwise valid write.
+        text = fragment if fragment is not None else content
 
         async def _do(session: AsyncSession) -> dict:
-            return await memory_svc.append_fragment(session, team_id, project, keyword, fragment, team_name)
+            if text is None:
+                raise ValueError(errors.missing_fragment())
+            return await memory_svc.append_fragment(session, team_id, project, keyword, text, team_name)
 
         return await _run("memory_append", _do, project=project, keyword=keyword)
 
