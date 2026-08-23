@@ -7,6 +7,8 @@ import { dirname } from "node:path";
 import { createClient as realCreateClient } from "./mcp-client.js";
 import { deriveSlug as realDeriveSlug } from "./slug.js";
 import { writeAgentRules as realWriteAgentRules } from "./rules.js";
+import { resolvePaths } from "./paths.js";
+import { runStartupGc } from "./gc.js";
 
 export const USAGE = `archivist-connect — connect this machine's coding agent to an Archivist server.
 
@@ -149,15 +151,32 @@ export function installCompanion({ scope, runClaude = defaultRunClaude, packageR
   return { ok: true, error: null };
 }
 
+// Writes into the Archivist root (creating it). Settings from a pre-1.1
+// `~/.archivist-companion.json` are carried over and that file is removed, so
+// upgrading leaves nothing behind in the root of the home directory.
 export function writeCompanionConfig({ serverUrl, apiKey, env = process.env, home, fs = nodeFs }) {
-  const path = env.ARCHIVIST_COMPANION_CONFIG || join(home, ".archivist-companion.json");
+  const paths = resolvePaths({ env, home });
+  const read = (p) => {
+    try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
+  };
   let cur = {};
-  if (fs.existsSync(path)) {
-    try { cur = JSON.parse(fs.readFileSync(path, "utf8")); } catch { cur = {}; }
+  let migrated = false;
+  if (fs.existsSync(paths.configFile)) {
+    cur = read(paths.configFile) || {};
+  } else if (fs.existsSync(paths.legacyConfigFile)) {
+    cur = read(paths.legacyConfigFile) || {};
+    migrated = true;
   }
   const next = { ...cur, serverUrl, apiKey };
-  fs.writeFileSync(path, JSON.stringify(next, null, 2) + "\n");
-  return { path };
+  fs.mkdirSync(paths.data, { recursive: true });
+  fs.writeFileSync(paths.configFile, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
+  // The file holds a team API key: keep it owner-only even when it pre-existed
+  // with laxer permissions (no-op on Windows).
+  try { fs.chmodSync(paths.configFile, 0o600); } catch { /* not supported here */ }
+  if (migrated) {
+    try { fs.rmSync(paths.legacyConfigFile, { force: true }); } catch { /* leave it */ }
+  }
+  return { path: paths.configFile, migrated };
 }
 
 export async function run({ argv, deps = {} }) {
@@ -174,6 +193,9 @@ export async function run({ argv, deps = {} }) {
 
   const args = parseArgs(argv);
   if (args.help) { log(USAGE); return 0; }
+
+  // Sweep whatever a previous, abruptly-killed run left behind. Never blocks.
+  runStartupGc({ paths: resolvePaths({ env, home }) });
 
   if (!["user", "project", "local"].includes(args.scope)) {
     log(`error: --scope must be one of: user, project, local (got: ${args.scope})`);
@@ -232,6 +254,7 @@ export async function run({ argv, deps = {} }) {
     try {
       const cfg = _writeCompanionConfig({ serverUrl: server, apiKey: key, env, home });
       log(`✓ wrote companion config: ${cfg.path}`);
+      if (cfg.migrated) log("  (migrated from ~/.archivist-companion.json, now removed)");
     } catch (err) {
       log(`• could not write companion config: ${err && err.message ? err.message : String(err)}`);
     }

@@ -9,8 +9,16 @@ import { deriveSlug } from "../lib/slug.js";
 import { createClient } from "../lib/mcp-client.js";
 import { runSweep } from "../lib/sweep.js";
 import { finishSilently } from "../lib/finish.js";
+import { runStartupGc } from "../lib/gc.js";
+import { log } from "../lib/log.js";
 
 (async () => {
+  // Reclaim leftovers from earlier sessions (including SIGKILLed ones)
+  // before doing anything else. Never throws, never blocks startup.
+  const gc = runStartupGc();
+  if (gc.temp.removed || gc.cache.removed) {
+    log(`gc: removed ${gc.temp.removed} temp dir(s), ${gc.cache.removed} cache entr(y|ies)`);
+  }
   try {
     const cwd = process.argv[2] || process.cwd();
     const cfg = loadConfig();
@@ -18,8 +26,9 @@ import { finishSilently } from "../lib/finish.js";
     const client = createClient({ serverUrl: cfg.serverUrl, apiKey: cfg.apiKey });
     const result = await runSweep({ cfg, slug, client });
     process.stdout.write(JSON.stringify({ slug, ...result }) + "\n");
-  } catch {
-    // fail-silent
+  } catch (err) {
+    // fail-silent. Visible only with ARCHIVIST_DEBUG=1.
+    log(`sweep: ${err && err.message ? err.message : err}`);
   }
   // Drain instead of forcing exit: the mcp-client's undici socket is still
   // closing here, and process.exit(0) would race it into a libuv crash on

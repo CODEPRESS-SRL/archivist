@@ -1,4 +1,8 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import * as nodeFs from "node:fs";
+import { join } from "node:path";
+import { resolvePaths } from "./paths.js";
+import { createTempDir, removeTempDir } from "./tempdir.js";
 
 // JSON for `claude --mcp-config`: a single remote streamable-HTTP Archivist
 // server authenticated with the team Bearer key.
@@ -12,6 +16,27 @@ export function mcpConfigJson(cfg) {
       },
     },
   });
+}
+
+// Stage the config as a file under the Archivist temp root instead of passing
+// it inline: the inline form puts the team API key in the child's command line,
+// where any local process can read it out of `ps` / Task Manager.
+//
+// `register` mirrors the spawn mode. A detached child outlives us and must keep
+// reading the file, so its directory is left for the startup GC (which only
+// reclaims it once this PID is gone and it is hours old); an awaited child lets
+// us delete deterministically.
+export function stageMcpConfig(cfg, { paths = resolvePaths(), fs = nodeFs, register = true } = {}) {
+  const json = mcpConfigJson(cfg);
+  try {
+    const dir = createTempDir({ paths, register });
+    const file = join(dir, "mcp-config.json");
+    fs.writeFileSync(file, json, { mode: 0o600 });
+    return { value: file, dir };
+  } catch {
+    // Unwritable root: fall back to the inline form rather than lose the run.
+    return { value: json, dir: null };
+  }
 }
 
 export function buildArgs({ prompt, mcpConfig, allowedTools, model, maxTurns }) {
@@ -30,8 +55,19 @@ export function buildArgs({ prompt, mcpConfig, allowedTools, model, maxTurns }) 
 // ARCHIVIST_HEADLESS=1 so its own SessionEnd/SessionStart hooks no-op (no
 // recursion). detached:true fire-and-forgets (used at session end so teardown
 // is never delayed); detached:false awaits the child (used by the sweep CLI).
-export function runHeadless({ cfg, prompt, allowedTools, model, maxTurns, detached = false, spawn = nodeSpawn }) {
-  const args = buildArgs({ prompt, mcpConfig: mcpConfigJson(cfg), allowedTools, model, maxTurns });
+export function runHeadless({
+  cfg,
+  prompt,
+  allowedTools,
+  model,
+  maxTurns,
+  detached = false,
+  spawn = nodeSpawn,
+  paths = resolvePaths(),
+  fs = nodeFs,
+}) {
+  const staged = stageMcpConfig(cfg, { paths, fs, register: !detached });
+  const args = buildArgs({ prompt, mcpConfig: staged.value, allowedTools, model, maxTurns });
   const env = { ...process.env, ARCHIVIST_HEADLESS: "1" };
   if (detached) {
     const child = spawn("claude", args, { detached: true, stdio: "ignore", env });
@@ -44,8 +80,12 @@ export function runHeadless({ cfg, prompt, allowedTools, model, maxTurns, detach
     return Promise.resolve({ detached: true });
   }
   return new Promise((resolve) => {
+    const done = (result) => {
+      if (staged.dir) removeTempDir(staged.dir);
+      resolve(result);
+    };
     const child = spawn("claude", args, { stdio: "ignore", env });
-    child.on("close", (code) => resolve({ code }));
-    child.on("error", () => resolve({ error: true }));
+    child.on("close", (code) => done({ code }));
+    child.on("error", () => done({ error: true }));
   });
 }

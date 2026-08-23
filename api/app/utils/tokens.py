@@ -7,6 +7,13 @@ from __future__ import annotations
 
 import tiktoken
 
+from app.paths import configure_cache_env
+
+# tiktoken downloads cl100k_base on first use and caches it in the OS temp dir
+# unless TIKTOKEN_CACHE_DIR says otherwise. Pin it under the Archivist root
+# before the encoder is ever built (no-op when the deployment sets its own).
+configure_cache_env()
+
 _encoder: tiktoken.Encoding | None = None
 
 

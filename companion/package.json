@@ -21,7 +21,10 @@
     "memory",
     "agent-memory"
   ],
-  "bin": { "archivist-connect": "./scripts/connect.js" },
+  "bin": {
+    "archivist-connect": "./scripts/connect.js",
+    "archivist": "./scripts/archivist.js"
+  },
   "scripts": {
     "test": "node --test"
   }

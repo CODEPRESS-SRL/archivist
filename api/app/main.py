@@ -27,6 +27,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.log import configure_logging, get_logger
 from app.mcp_server import build_mcp
+from app.paths import collect_garbage, configure_cache_env
 
 logger = get_logger()
 
@@ -63,6 +64,11 @@ async def healthz(session: AsyncSession = Depends(get_session)) -> JSONResponse:
 def create_app() -> FastAPI:
     """Build and return the FastAPI application."""
     configure_logging()
+    # Keep third-party caches inside the declared Archivist root, and reclaim
+    # whatever a previous (possibly killed) process left in its temp dir.
+    # Neither can fail the boot: both swallow their own errors.
+    configure_cache_env()
+    collect_garbage()
     settings = get_settings()
     # A fresh FastMCP per app: its session manager's run() is one-shot per
     # instance, so reusing a global would break a second create_app() (tests).

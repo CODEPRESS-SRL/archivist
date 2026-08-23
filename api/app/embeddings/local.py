@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from fastembed import TextEmbedding
 
+from app.paths import configure_cache_env
+
+# fastembed downloads a ~130 MB ONNX model on first use and caches it in the OS
+# temp dir unless FASTEMBED_CACHE_PATH says otherwise. Pin it under the
+# Archivist root (the Docker image sets its own, which wins).
+configure_cache_env()
+
 
 class LocalEmbedder:
     def __init__(self, model_id: str, dim: int) -> None:

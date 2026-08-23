@@ -99,11 +99,18 @@ import { writeAgentConfigs } from "../lib/connect.js";
 
 function memFs(seed = {}) {
   const files = { ...seed };
+  const dirs = new Set();
+  const modes = {};
   return {
     files,
+    dirs,
+    modes,
     existsSync: (p) => Object.prototype.hasOwnProperty.call(files, p),
     readFileSync: (p) => files[p],
-    writeFileSync: (p, data) => { files[p] = data; },
+    writeFileSync: (p, data, opts) => { files[p] = data; if (opts?.mode) modes[p] = opts.mode; },
+    mkdirSync: (p) => { dirs.add(p); },
+    chmodSync: (p, mode) => { modes[p] = mode; },
+    rmSync: (p) => { delete files[p]; },
   };
 }
 
@@ -170,28 +177,59 @@ test("installCompanion: install failure surfaces error", () => {
 });
 
 import { writeCompanionConfig } from "../lib/connect.js";
+import { resolvePaths } from "../lib/paths.js";
 
-test("writeCompanionConfig: creates file with serverUrl+apiKey at default path", () => {
+const HOME = "/home/u";
+const ROOT = { ARCHIVIST_HOME: "/root/arc" };
+const at = (env) => resolvePaths({ env, home: HOME });
+
+test("writeCompanionConfig: writes into the Archivist root, never the home root", () => {
   const fs = memFs();
-  const r = writeCompanionConfig({ serverUrl: "https://x/mcp/", apiKey: "arc_1", env: {}, home: "/home/u", fs });
-  assert.equal(r.path, "/home/u/.archivist-companion.json");
+  const r = writeCompanionConfig({ serverUrl: "https://x/mcp/", apiKey: "arc_1", env: ROOT, home: HOME, fs });
+  const paths = at(ROOT);
+  assert.equal(r.path, paths.configFile);
+  assert.ok(r.path.startsWith(paths.data));
+  assert.notEqual(r.path, paths.legacyConfigFile);
+  assert.ok(fs.dirs.has(paths.data), "the root is created if missing");
   const parsed = JSON.parse(fs.files[r.path]);
   assert.equal(parsed.serverUrl, "https://x/mcp/");
   assert.equal(parsed.apiKey, "arc_1");
 });
 
-test("writeCompanionConfig: preserves unrelated keys, honors ARCHIVIST_COMPANION_CONFIG", () => {
-  const custom = "/tmp/cfg.json";
-  const fs = memFs({ [custom]: JSON.stringify({ captureModel: "sonnet", serverUrl: "old", apiKey: "old" }) });
-  const r = writeCompanionConfig({
-    serverUrl: "https://new/mcp/", apiKey: "arc_new",
-    env: { ARCHIVIST_COMPANION_CONFIG: custom }, home: "/home/u", fs,
+test("writeCompanionConfig: the API key file is owner-only", () => {
+  const fs = memFs();
+  const r = writeCompanionConfig({ serverUrl: "https://x/mcp/", apiKey: "arc_1", env: ROOT, home: HOME, fs });
+  assert.equal(fs.modes[r.path], 0o600);
+});
+
+test("writeCompanionConfig: preserves unrelated keys already in the file", () => {
+  const paths = at(ROOT);
+  const fs = memFs({
+    [paths.configFile]: JSON.stringify({ captureModel: "sonnet", serverUrl: "old", apiKey: "old" }),
   });
-  assert.equal(r.path, custom);
-  const parsed = JSON.parse(fs.files[custom]);
+  const r = writeCompanionConfig({
+    serverUrl: "https://new/mcp/", apiKey: "arc_new", env: ROOT, home: HOME, fs,
+  });
+  const parsed = JSON.parse(fs.files[r.path]);
   assert.equal(parsed.captureModel, "sonnet"); // preserved
   assert.equal(parsed.serverUrl, "https://new/mcp/"); // overwritten
   assert.equal(parsed.apiKey, "arc_new");
+  assert.equal(r.migrated, false);
+});
+
+test("writeCompanionConfig: migrates the pre-1.1 file and removes it", () => {
+  const paths = at(ROOT);
+  const fs = memFs({
+    [paths.legacyConfigFile]: JSON.stringify({ captureModel: "opus", serverUrl: "old", apiKey: "old" }),
+  });
+  const r = writeCompanionConfig({
+    serverUrl: "https://new/mcp/", apiKey: "arc_new", env: ROOT, home: HOME, fs,
+  });
+  assert.equal(r.migrated, true);
+  assert.equal(fs.files[paths.legacyConfigFile], undefined, "nothing is left in the home root");
+  const parsed = JSON.parse(fs.files[paths.configFile]);
+  assert.equal(parsed.captureModel, "opus", "settings carried over");
+  assert.equal(parsed.serverUrl, "https://new/mcp/");
 });
 
 import { run } from "../lib/connect.js";
@@ -207,7 +245,7 @@ function spyDeps(over = {}) {
       writeAgentConfigs: rec("writeAgentConfigs", { codex: false, cursor: false }),
       writeAgentRules: rec("writeAgentRules", { claude: false, codex: false }),
       installCompanion: rec("installCompanion", { ok: true, error: null }),
-      writeCompanionConfig: rec("writeCompanionConfig", { path: "/home/u/.archivist-companion.json" }),
+      writeCompanionConfig: rec("writeCompanionConfig", { path: "/root/arc/companion.json", migrated: false }),
       log: () => {},
       home: "/home/u",
       cwd: "/repo",

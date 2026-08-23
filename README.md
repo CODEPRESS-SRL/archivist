@@ -171,6 +171,44 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full dev setup.
 
 ---
 
+## What Archivist writes to your disk
+
+Memories live in Postgres on the server. On a **client** machine, the only
+thing installed locally is the optional companion, and everything it persists
+sits under a single directory:
+
+| Platform | Root | Cache |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\Archivist` | `%LOCALAPPDATA%\Archivist\Cache` |
+| macOS | `~/Library/Application Support/Archivist` | `~/Library/Caches/Archivist` |
+| Linux | `$XDG_DATA_HOME/archivist` | `$XDG_CACHE_HOME/archivist` |
+
+`ARCHIVIST_HOME` relocates that root; it is the only override. Nothing is
+written to the working directory, to the root of your home, or next to the
+sources — and no log file exists unless you ask for one
+(`ARCHIVIST_LOG_FILE=1`; diagnostics otherwise go to stderr, as the MCP spec
+requires). Temporary directories are cleaned up when a run ends, and a startup
+sweep reclaims whatever an abrupt kill left behind.
+
+```bash
+npx --package archivist-connect archivist paths   # what is written, where, how big
+npx --package archivist-connect archivist purge   # remove all of it
+```
+
+**After uninstalling**, `archivist purge` leaves nothing of its own behind. What
+stays are the entries Archivist added to *other tools'* files — the plugin under
+`~/.claude/plugins/`, the MCP registration in Claude Code / `~/.codex/config.toml`
+/ `~/.cursor/mcp.json`, and the `archivist:begin…end` rule block in
+`~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. `archivist paths` prints the exact
+list; removal instructions are in
+[companion/README.md](companion/README.md#uninstalling).
+
+On a **server**, `python -m app.paths` prints the same inventory for the API
+process (its only local footprint is the pinned fastembed/tiktoken cache; in
+Docker both live inside the image).
+
+---
+
 ## Documentation
 
 | Guide | What's inside |

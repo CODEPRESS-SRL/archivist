@@ -61,6 +61,48 @@ main tunables:
 | `NEAR_DUPLICATE_THRESHOLD` | `0.80` | Cosine similarity above which `memory_upsert` flags a keyword as a near-duplicate. |
 | `STALE_REPORT_DAYS` | `90` | Entry age (days) after which it is reported as stale. |
 
+### On-disk footprint and logging
+
+The server keeps its state in Postgres. Locally it writes only two third-party
+caches, both pinned so nothing lands in the OS temp directory:
+
+| What | Size | Where |
+|---|---|---|
+| fastembed ONNX model (`bge-small-en-v1.5`) | ~130 MB | `FASTEMBED_CACHE_PATH` |
+| tiktoken `cl100k_base` vocabulary | ~2 MB | `TIKTOKEN_CACHE_DIR` |
+
+In Docker both are baked into the image at build time (`/app/.fastembed_cache`,
+`/app/.tiktoken_cache`), so a container never downloads anything at runtime and
+never writes a cache outside itself. Running the API **outside** Docker, the
+app pins them under the platform's Archivist root instead
+(`$XDG_DATA_HOME/archivist/cache/…` on Linux) — set `ARCHIVIST_HOME` to move
+the whole tree, or either variable to pin one cache explicitly. An explicit
+setting always wins.
+
+Inspect or clear it:
+
+```bash
+python -m app.paths            # inventory: what is written, where, how big
+python -m app.paths --gc       # reclaim temp dirs left by killed processes
+python -m app.paths --purge    # delete the whole Archivist directory
+```
+
+Logs go to **stderr** as JSON, one object per line — stdout is reserved for MCP
+protocol traffic. There is no log file unless you set `ARCHIVIST_LOG_FILE=1`,
+which additionally appends to `<root>/logs/archivist.log`, rotated at 1 MB with
+one backup (bounded at 2 MB). It is **single-process only** — the api and the
+embed worker resolve the same file, and `RotatingFileHandler` rollover is not
+safe across processes, so enable it on one service at a time. Under Docker,
+prefer the container log driver (`docker compose logs -f api`) and leave the
+file logging off.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ARCHIVIST_HOME` | platform default | Relocates the entire Archivist directory. The only path override. |
+| `ARCHIVIST_LOG_FILE` | unset | `1` also writes a rotated log file under the root. |
+| `FASTEMBED_CACHE_PATH` | `/app/.fastembed_cache` in Docker | Embedding-model cache. |
+| `TIKTOKEN_CACHE_DIR` | `/app/.tiktoken_cache` in Docker | Tokenizer vocabulary cache. |
+
 ## Option A — dedicated host
 
 Expose only SSH and the web ports, then bring the whole stack up:

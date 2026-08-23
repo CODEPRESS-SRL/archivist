@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.embeddings.base import Embedder, get_embedder
 from app.log import configure_logging, get_logger
 from app.models import Memory
+from app.paths import collect_garbage, configure_cache_env
 
 logger = get_logger()
 
@@ -96,6 +97,10 @@ async def run_forever(
 
 def main() -> None:  # pragma: no cover - process entry point
     configure_logging()
+    # The worker is the process that actually downloads the embedding model:
+    # pin its cache under the Archivist root before the embedder is built.
+    configure_cache_env()
+    collect_garbage()
     s = get_settings()
     asyncio.run(run_forever(get_embedder(), s.embed_poll_seconds, s.embed_batch_size))
 

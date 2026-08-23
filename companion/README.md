@@ -78,11 +78,24 @@ claude --plugin-dir companion
 
 ## Configuration
 
-Config lives at `~/.archivist-companion.json` (override the path with
-`ARCHIVIST_COMPANION_CONFIG`). A missing or malformed file simply falls back
-to defaults — nothing throws. See
-[`.archivist-companion.example.json`](./.archivist-companion.example.json)
+Config lives under the Archivist root (see
+[Where things are written](#where-things-are-written)):
+
+| Platform | Config file |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Archivist\companion.json` |
+| macOS | `~/Library/Application Support/Archivist/companion.json` |
+| Linux | `$XDG_DATA_HOME/archivist/companion.json` (fallback `~/.local/share/archivist/companion.json`) |
+
+A missing or malformed file simply falls back to defaults — nothing throws.
+See [`.archivist-companion.example.json`](./.archivist-companion.example.json)
 for a starting point.
+
+> **Upgrading from 1.0:** the config used to live at
+> `~/.archivist-companion.json`. That file is still read as a fallback, and the
+> next `npx archivist-connect` migrates its contents to the new location and
+> deletes it. Nothing to do by hand. `ARCHIVIST_COMPANION_CONFIG` is gone —
+> use `ARCHIVIST_HOME` to relocate the whole root instead.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -102,10 +115,70 @@ take precedence over the file:
 
 - `ARCHIVIST_SERVER_URL`
 - `ARCHIVIST_API_KEY`
-- `ARCHIVIST_COMPANION_CONFIG` — alternate path to the config file itself
 
 The plugin considers itself configured only when both `serverUrl` and
 `apiKey` are set (from file or env); otherwise C1, C2, and C3 all no-op.
+
+Three more variables control the footprint, not the behaviour:
+
+| Variable | Effect |
+|---|---|
+| `ARCHIVIST_HOME` | Relocates the entire Archivist directory (cache and temp included). The only path override there is. |
+| `ARCHIVIST_DEBUG=1` | Print diagnostics to **stderr** (never stdout — a SessionStart hook's stdout is the injected index). Off by default, so the fail-silent contract holds. |
+| `ARCHIVIST_LOG_FILE=1` | Also append to `<root>/logs/companion.log`, rotated at 1 MB with one backup — so logging costs at most 2 MB, forever. No log file exists unless you set this. |
+
+## Where things are written
+
+Everything the companion persists lives under **one** directory:
+
+| Platform | Root | Cache |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\Archivist` | `%LOCALAPPDATA%\Archivist\Cache` |
+| macOS | `~/Library/Application Support/Archivist` | `~/Library/Caches/Archivist` |
+| Linux | `$XDG_DATA_HOME/archivist` | `$XDG_CACHE_HOME/archivist` |
+
+Inside it: `companion.json` (the config, `chmod 600` — it holds your API key),
+`tmp/` (short-lived `archivist-<pid>-*` directories staging the MCP config for
+a headless run), `logs/` (only if you opted in), and `<cache>/companion/`
+(bounded by a size cap and a TTL). The companion prunes only its own cache
+subdirectory — on Windows the cache root is shared with a locally-run Archivist
+server's model cache, which it must never evict.
+
+Nothing is ever written to the working directory, to the root of your home
+directory, or next to the sources. Temporary directories are removed when the
+run finishes; if the process is killed outright (`SIGKILL`, a hook timeout, a
+crashing IDE), the next startup reclaims whatever it left behind — anything
+carrying the `archivist-` prefix, older than 12 hours, whose owning process is
+gone. That sweep is idempotent and can never block a session from starting.
+
+Inspect it yourself:
+
+```bash
+npx --package archivist-connect archivist paths   # what is written, where, how big
+npx --package archivist-connect archivist gc      # run the cleanup sweep now
+npx --package archivist-connect archivist purge   # delete all of it (asks first)
+```
+
+## Uninstalling
+
+`archivist purge` removes the Archivist directory, the API key included. Four
+things live **outside** that root, because they belong to other tools, and
+`purge` deliberately leaves them alone — remove them by hand if you want a
+clean machine:
+
+| What | Where | How to remove |
+|---|---|---|
+| The companion plugin | `~/.claude/plugins/…` | `claude plugin uninstall archivist-companion@archivist-tools` |
+| MCP registration | Claude Code's own config | `claude mcp remove archivist -s user` |
+| MCP registration | `~/.codex/config.toml`, `~/.cursor/mcp.json` | delete the `archivist` entry |
+| The rule block | `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` | delete the block between `<!-- archivist:begin -->` and `<!-- archivist:end -->` |
+
+`archivist paths` prints this same list, with the real paths for your machine.
+
+Note that the capture (C1) and sweep (C2) runs spawn `claude` itself, and each
+of those sessions writes its own transcript under `~/.claude/projects/` — that
+is Claude Code's own storage, subject to its retention settings, not
+Archivist's.
 
 ## Scheduling the sweep
 

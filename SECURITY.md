@@ -178,12 +178,23 @@ column (`memories.keyword_embedding`, migration `0005`): `memory_upsert`'s
 session-start index) that runs entirely on the developer's machine, not on
 the server.
 
-- **Key storage**: the team API key lives in `~/.archivist-companion.json`
-  (or the path in `ARCHIVIST_COMPANION_CONFIG`), plaintext, client-side. This
-  is the same exposure as any other MCP client config (e.g.
+- **Key storage**: the team API key lives in `companion.json` under the
+  Archivist root — `%LOCALAPPDATA%\Archivist` (Windows),
+  `~/Library/Application Support/Archivist` (macOS), `$XDG_DATA_HOME/archivist`
+  (Linux); relocate with `ARCHIVIST_HOME`. Plaintext, client-side, written
+  `chmod 600`. This is the same exposure as any other MCP client config (e.g.
   `claude mcp add … --header "Authorization: Bearer …"`) — protect the file
   with normal filesystem permissions; if it's copied off the machine, treat
   the key as leaked and rotate it (see "Painless rotation" above).
+  `archivist purge` removes it along with the rest of the root.
+- **Key never on a command line**: the headless `claude -p` runs (C1 capture,
+  C2 sweep) receive their MCP config as a `chmod 600` file staged under
+  `<root>/tmp`, not inline in `--mcp-config` — an inline argument is readable
+  by any local process through `ps` / Task Manager. An awaited run deletes the
+  file immediately; a detached capture cannot (the child is still reading it),
+  so its staged copy is reclaimed by the startup garbage collection instead —
+  same directory, same permissions, and same exposure as `companion.json`
+  itself.
 - **No secrets in auto-captured memory**: C1 sends a condensed session
   transcript to a headless `claude -p` run whose prompt explicitly forbids
   saving API keys, tokens, passwords, connection strings, or

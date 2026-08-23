@@ -15,8 +15,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
+
+from app.paths import resolve_paths
+
+# Ceiling for the opt-in log file; with backupCount=1 the on-disk cost of
+# logging can never exceed twice this.
+LOG_MAX_BYTES = 1024 * 1024
 
 # Optional fields promoted from ``logger.info(..., extra={...})`` to the top
 # level of the JSON line. Absent fields are simply omitted, keeping lines lean.
@@ -52,14 +60,42 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    """Point the root logger at a single JSON stdout handler (idempotent)."""
-    handler = logging.StreamHandler(sys.stdout)
+def configure_logging(level: int = logging.INFO, env: dict[str, str] | None = None) -> None:
+    """Point the root logger at a JSON **stderr** handler (idempotent).
+
+    stderr, not stdout: the MCP spec reserves stdout for protocol traffic, so a
+    diagnostic line there corrupts the stream for any stdio-transport client.
+
+    A log FILE is opt-in (``ARCHIVIST_LOG_FILE=1``), lives under the Archivist
+    root, and is rotated at 1 MB keeping one backup — bounded at 2 MB forever.
+    Nothing is written to disk by default.
+
+    Single-process only: ``RotatingFileHandler`` rollover is not safe across
+    processes, so do not enable it on the api and the embed worker at the same
+    time (they resolve the same file). Under Docker prefer the container log
+    driver — ``docker compose logs -f api`` — and leave this off.
+    """
+    env = os.environ if env is None else env
+    handler: logging.Handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level)
+
+    if env.get("ARCHIVIST_LOG_FILE") not in ("1", "true"):
+        return
+    try:
+        log_file = resolve_paths(env).log_file
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_file, maxBytes=LOG_MAX_BYTES, backupCount=1, encoding="utf-8"
+        )
+        file_handler.setFormatter(JsonFormatter())
+        root.addHandler(file_handler)
+    except OSError:
+        # An unwritable root must never stop the process from starting.
+        pass
 
 
 def get_logger(name: str = "archivist") -> logging.Logger:

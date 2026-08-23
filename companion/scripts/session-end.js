@@ -7,6 +7,8 @@ import { loadConfig } from "../lib/config.js";
 import { deriveSlug } from "../lib/slug.js";
 import { readTranscript } from "../lib/transcript.js";
 import { runCapture } from "../lib/capture.js";
+import { runStartupGc } from "../lib/gc.js";
+import { log } from "../lib/log.js";
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -19,6 +21,12 @@ function readStdin() {
 }
 
 (async () => {
+  // Reclaim leftovers from earlier sessions (including SIGKILLed ones)
+  // before doing anything else. Never throws, never blocks startup.
+  const gc = runStartupGc();
+  if (gc.temp.removed || gc.cache.removed) {
+    log(`gc: removed ${gc.temp.removed} temp dir(s), ${gc.cache.removed} cache entr(y|ies)`);
+  }
   try {
     const input = JSON.parse((await readStdin()) || "{}");
     const cwd = input.cwd || process.cwd();
@@ -26,8 +34,9 @@ function readStdin() {
     const slug = deriveSlug(cwd);
     const transcript = readTranscript(input.transcript_path || "");
     await runCapture({ cfg, slug, transcript });
-  } catch {
-    // fail-silent
+  } catch (err) {
+    // fail-silent. Visible only with ARCHIVIST_DEBUG=1.
+    log(`session-end: ${err && err.message ? err.message : err}`);
   }
   process.exit(0);
 })();

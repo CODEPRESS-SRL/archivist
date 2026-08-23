@@ -39,11 +39,17 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # --reload picks up host edits; in prod the baked copy is what runs.
 COPY --chown=app:app app ./app
 
-# Pre-download the embedding model so the worker starts offline/reproducibly
-# (bge-small-en-v1.5 ≈ 130 MB). FASTEMBED_CACHE_PATH pins the cache location.
-ENV FASTEMBED_CACHE_PATH=/app/.fastembed_cache
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')" \
-    && chown -R app:app /app/.fastembed_cache
+# Pre-download the embedding model and the tiktoken vocabulary so the container
+# starts offline/reproducibly and never writes a cache at runtime
+# (bge-small-en-v1.5 ≈ 130 MB; cl100k_base ≈ 1.6 MB). Both env vars pin the
+# cache location — set here, they take precedence over app.paths' defaults, so
+# nothing is ever written outside /app.
+ENV FASTEMBED_CACHE_PATH=/app/.fastembed_cache \
+    TIKTOKEN_CACHE_DIR=/app/.tiktoken_cache
+RUN mkdir -p /app/.tiktoken_cache \
+    && python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')" \
+    && python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')" \
+    && chown -R app:app /app/.fastembed_cache /app/.tiktoken_cache
 
 # Alembic config + migration scripts. Baked in (not bind-mounted) so
 # `docker compose exec api alembic upgrade head` works in dev and prod alike.

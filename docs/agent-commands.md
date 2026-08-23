@@ -8,6 +8,18 @@ Everything a developer invokes on their coding agent once connected to Archivist
 |---|---|
 | `npx archivist-connect --server <url> --key <arc_...>` | Verify the token, register the MCP in Claude Code (auto-detect Codex/Cursor), install + configure the companion. See flags in [companion/README](../companion/README.md#one-command-setup). |
 
+## Housekeeping
+
+| Command | What it does |
+|---|---|
+| `npx --package archivist-connect archivist paths` | Print every path Archivist writes to on this machine, with sizes, plus what lives outside its root. |
+| `npx --package archivist-connect archivist gc` | Run the startup cleanup sweep now (stale `archivist-*` temp dirs owned by dead processes). |
+| `npx --package archivist-connect archivist purge` | Delete the whole Archivist directory, API key included. Asks for confirmation unless `--yes`. |
+| `python -m app.paths [--gc\|--purge]` | The same three, for a self-hosted API server. |
+
+See [Where things are written](../companion/README.md#where-things-are-written)
+and [Uninstalling](../companion/README.md#uninstalling).
+
 ## MCP tools (called by the agent during a session)
 
 The agent calls these automatically per the protocol shipped in the MCP

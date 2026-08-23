@@ -17,8 +17,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a keyword only. This is how an agent checks, or recovers, what a forgetting
   sweep dropped.
 
+- **A single filesystem root, on every platform.** Everything Archivist
+  persists on a machine now lives under one directory —
+  `%LOCALAPPDATA%\Archivist` (Windows), `~/Library/Application Support/Archivist`
+  (macOS), `$XDG_DATA_HOME/archivist` (Linux, fallback `~/.local/share`), with
+  the cache in the platform's conventional place. `ARCHIVIST_HOME` relocates the
+  whole tree and is the only override. Nothing is written to the working
+  directory, the root of the home directory, or next to the sources.
+- **`archivist paths` / `archivist gc` / `archivist purge`** (npm bin) and
+  `python -m app.paths [--gc|--purge]` (server): print exactly what is written
+  and where, sweep leftovers, or remove everything. Both READMEs document what
+  remains on disk after uninstalling.
+- **Guaranteed temp-directory cleanup.** Temporary directories are created
+  under the Archivist root with an `archivist-<pid>-` prefix and removed by a
+  context manager, plus `atexit` and SIGINT/SIGTERM handlers (chained, so
+  uvicorn's graceful shutdown is preserved). A SIGKILL defeats all of those, so
+  every entry point also runs a startup garbage collection: it removes only
+  Archivist-prefixed directories, older than 12 hours, whose owning PID is
+  gone. Idempotent, and it can never block startup.
+
 ### Fixed
 
+- **fastembed and tiktoken no longer cache outside the declared root.** The
+  tokenizer downloaded `cl100k_base` into the OS temp directory on first use
+  (in the container too — the image never pre-warmed it), and outside Docker
+  fastembed put its ~130 MB ONNX model there as well. Both caches are now
+  pinned under the Archivist root, and the image pre-downloads and pins both,
+  so a container performs no runtime download and writes no cache outside
+  itself. An explicitly-set `FASTEMBED_CACHE_PATH`/`TIKTOKEN_CACHE_DIR` always
+  wins.
+- **Logs go to stderr, not stdout.** stdout is reserved for MCP protocol
+  traffic. A log file is opt-in (`ARCHIVIST_LOG_FILE=1`), lives under the
+  Archivist root, and rotates at 1 MB keeping one backup — bounded at 2 MB
+  forever.
+- **The companion API key is no longer passed on a child's command line.** The
+  headless `claude -p` runs received the team key inline via `--mcp-config`,
+  where any local process could read it out of `ps` / Task Manager. It is now
+  staged in a `chmod 600` file under the Archivist root.
+- **Two companion regression tests were silently inert.** The "configured
+  against a live MCP server" cases built their environment by deleting
+  `ARCHIVIST_SERVER_URL`/`ARCHIVIST_API_KEY` *after* applying them, so the
+  scripts ran unconfigured and never exercised the undici teardown path they
+  were meant to guard.
 - **Parameter-name aliases on `memory_append` and `memory_get`.** The two
   tools whose parameter name differs from the rest of the surface were the
   only source of malformed calls in the field: agents carry `content` over
@@ -29,6 +69,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Companion config moved into the Archivist root** —
+  `<root>/companion.json`, written `chmod 600` because it holds the team API
+  key. The pre-1.1 `~/.archivist-companion.json` is still read as a fallback
+  and is migrated (then deleted) by the next `archivist-connect` run, so
+  existing installs keep working untouched. `ARCHIVIST_COMPANION_CONFIG` is
+  removed in favour of the single `ARCHIVIST_HOME` override.
 - **Three-tier entry size model.** The compaction/sweep trigger is decoupled
   from the 2 000-token soft cap. An entry is now flagged `compaction_due` (and
   swept by the companion) only when it exceeds the new **8 000-token target**
