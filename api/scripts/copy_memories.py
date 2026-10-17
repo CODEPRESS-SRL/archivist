@@ -19,10 +19,31 @@ by NAME on both sides and never created. The mapping file is the Workspace's
 ``scartati[].slug``). Every project slug of the source team must be either
 mapped or discarded: otherwise the tool refuses to start and writes nothing.
 
-The whole run is ONE transaction on the destination; ``--solo-conteggi``
-computes the report and writes nothing. The copy is additive: it inserts what
-is missing and updates an entry only when the source has a higher version (or
-soft-deleted it at the same version); it never touches anything else.
+The whole run is ONE transaction on the destination (the source is read in a
+read-only REPEATABLE READ one); ``--solo-conteggi`` computes the report and
+writes nothing. The copy inserts what is missing and updates an entry only when
+the source has a higher version (or soft-deleted it at the same version). One
+destructive step exists: when an entry is updated, destination fragments that
+the source no longer has (consumed there by a compaction) are hard-deleted. The
+reverse direction (rollback) runs exactly the same logic with the roles swapped.
+
+Generation identity. (project, keyword) alone is not a stable identity: when an
+agent re-creates a soft-deleted keyword the app renames the deleted row to
+``<kw>#deleted#<id>`` and inserts a new ``<kw>``. So an entry is identified by
+(base keyword, created_at), where the base keyword is the keyword without the
+``#deleted#<id>`` suffix and ``created_at`` is copied as a value. Same plain
+keyword with a different created_at = a different generation: the destination
+row is renamed aside exactly as the app does (``<kw>#deleted#<destination id>``,
+marked deleted if it was not) and the source row is inserted as a new row. A
+source row already renamed on the source is inserted under the destination's own
+``#deleted#<id>`` suffix, never the source's number.
+
+Known limits (for the runbook): the ``--da-istante`` window is evaluated with
+the source's clock on ``created_at``/``updated_at`` and on the newer
+fragments/history, so take the instant on the database that will be the source
+of the reverse copy; a fragment removed with ``memory_delete_fragment`` (or by
+the admin console) is NOT propagated, because only an update of the entry
+removes destination fragments.
 """
 
 from __future__ import annotations
@@ -30,7 +51,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
+import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -55,6 +78,14 @@ from app.models import Memory, MemoryFragment, MemoryHistory, Project, Team  # n
 
 class ErroreCopia(Exception):
     """A refusal to run: bad mapping, missing team, unresolved slug."""
+
+
+class ErroreConnessione(ErroreCopia):
+    """A database could not be reached. Never carries the URL or the driver text."""
+
+    def __init__(self, lato: str) -> None:
+        self.lato = lato
+        super().__init__(f"connessione fallita ({lato})")
 
 
 class SlugSenzaDecisione(ErroreCopia):
@@ -220,6 +251,77 @@ def decidi_memoria(sorgente: StatoMemoria, destinazione: StatoMemoria | None) ->
     return Azione.NULLA
 
 
+_RINOMINATA = re.compile(r"^(.*)#deleted#\d+$", re.DOTALL)
+
+
+def keyword_base(keyword: str) -> str:
+    """The keyword without the app's ``#deleted#<id>`` rename-aside suffix."""
+    trovata = _RINOMINATA.match(keyword)
+    return trovata.group(1) if trovata else keyword
+
+
+def e_rinominata(keyword: str) -> bool:
+    return _RINOMINATA.match(keyword) is not None
+
+
+def keyword_da_parte(base: str, id_destinazione: int) -> str:
+    """Same form as ``memory.create_entry`` uses to free the unique slot."""
+    return f"{base}#deleted#{id_destinazione}"
+
+
+def identita_generazione(keyword: str, created_at: datetime) -> tuple[str, datetime]:
+    """Identity of one generation of an entry: (base keyword, created_at)."""
+    return (keyword_base(keyword), created_at)
+
+
+@dataclass(frozen=True)
+class RigaMemoria:
+    keyword: str
+    created_at: datetime
+    version: int
+    cancellata: bool
+
+
+@dataclass(frozen=True)
+class PianoMemoria:
+    azione: Azione
+    # Insert only: the destination row holding the plain keyword (another
+    # generation) must be renamed aside first...
+    metti_da_parte: bool = False
+    # ...and marked deleted, unless it already is.
+    cancella_occupante: bool = False
+    # Insert only: the new row must take ``<base>#deleted#<its own dest id>``.
+    keyword_con_id_destinazione: bool = False
+
+
+def pianifica_memoria(
+    sorgente: RigaMemoria,
+    corrispondente: RigaMemoria | None,
+    occupante: RigaMemoria | None,
+) -> PianoMemoria:
+    """Plan one source entry.
+
+    ``corrispondente``: the destination row of the SAME generation (same base
+    keyword and created_at), whatever its current keyword. ``occupante``: the
+    destination row that currently holds the plain keyword of the source row
+    (if any). Rows with a different created_at are different generations.
+    """
+    if corrispondente is not None:
+        return PianoMemoria(
+            decidi_memoria(
+                StatoMemoria(sorgente.version, sorgente.cancellata),
+                StatoMemoria(corrispondente.version, corrispondente.cancellata),
+            )
+        )
+    if e_rinominata(sorgente.keyword):
+        return PianoMemoria(Azione.INSERISCI, keyword_con_id_destinazione=True)
+    if occupante is None:
+        return PianoMemoria(Azione.INSERISCI)
+    return PianoMemoria(
+        Azione.INSERISCI, metti_da_parte=True, cancella_occupante=not occupante.cancellata
+    )
+
+
 def chiave_frammento(created_at: datetime, content: str) -> tuple[datetime, str]:
     return (created_at, content)
 
@@ -322,6 +424,10 @@ async def _memorie_sorgente(
     return list((await sessione.execute(stmt)).scalars().all())
 
 
+def _riga(m: Memory) -> RigaMemoria:
+    return RigaMemoria(m.keyword, m.created_at, m.version, m.deleted_at is not None)
+
+
 async def _copia_progetto(
     sorg: AsyncSession,
     dest: AsyncSession,
@@ -349,10 +455,14 @@ async def _copia_progetto(
         await dest.flush()
         project_dest = progetto.id
 
-    esistenti: dict[str, Memory] = {}
+    per_generazione: dict[tuple[str, datetime], Memory] = {}
+    occupanti: dict[str, Memory] = {}
     if project_dest is not None:
         righe = await dest.execute(select(Memory).where(Memory.project_id == project_dest))
-        esistenti = {m.keyword: m for m in righe.scalars().all()}
+        for riga in righe.scalars().all():
+            per_generazione[identita_generazione(riga.keyword, riga.created_at)] = riga
+            if not e_rinominata(riga.keyword):
+                occupanti[riga.keyword] = riga
 
     for m in memorie:
         frammenti = list(
@@ -384,23 +494,45 @@ async def _copia_progetto(
         in_sorgente.frammenti += len(frammenti)
         in_sorgente.storico += len(storico)
 
-        gia = esistenti.get(m.keyword)
-        azione = decidi_memoria(
-            StatoMemoria(m.version, m.deleted_at is not None),
-            None if gia is None else StatoMemoria(gia.version, gia.deleted_at is not None),
+        gia = per_generazione.get(identita_generazione(m.keyword, m.created_at))
+        occupante = occupanti.get(m.keyword)
+        piano = pianifica_memoria(
+            _riga(m),
+            None if gia is None else _riga(gia),
+            None if occupante is None else _riga(occupante),
         )
+        azione = piano.azione
         if azione is Azione.AGGIORNA and scrivi:
             assert gia is not None
             for nome in _COLONNE_AGGIORNAMENTO:
                 setattr(gia, nome, getattr(m, nome))
         elif azione is Azione.INSERISCI and scrivi:
+            if piano.metti_da_parte:
+                assert occupante is not None
+                # Exactly what the app does when a keyword is re-created.
+                occupante.keyword = keyword_da_parte(keyword_base(occupante.keyword), occupante.id)
+                if piano.cancella_occupante:
+                    occupante.deleted_at = datetime.now(UTC)
+                await dest.flush()
+                del occupanti[m.keyword]
+            provvisoria = piano.keyword_con_id_destinazione
             gia = Memory(
                 project_id=project_dest,
-                keyword=m.keyword,
+                # Never the source's numeric suffix: a temporary unique name,
+                # replaced by the destination's own id right after the insert.
+                keyword=f"{keyword_base(m.keyword)}#copia#{uuid.uuid4().hex}"
+                if provvisoria
+                else m.keyword,
                 **{nome: getattr(m, nome) for nome in _COLONNE_MEMORIA},
             )
             dest.add(gia)
             await dest.flush()
+            if provvisoria:
+                gia.keyword = keyword_da_parte(keyword_base(m.keyword), gia.id)
+                await dest.flush()
+            else:
+                occupanti[m.keyword] = gia
+            per_generazione[identita_generazione(m.keyword, m.created_at)] = gia
         if azione is not Azione.NULLA:
             if m.deleted_at is None:
                 da_scrivere.attive += 1
@@ -492,6 +624,22 @@ async def _copia_con_motori(
     sessione_sorg = async_sessionmaker(motore_sorg, expire_on_commit=False)
     sessione_dest = async_sessionmaker(motore_dest, expire_on_commit=False)
     async with sessione_sorg() as sorg, sessione_dest() as dest:
+        # The source is only read, in ONE consistent snapshot; the first
+        # statement of each session is also the first real connection, so a
+        # refused connection or bad credentials surfaces here, without the URL.
+        try:
+            await sorg.connection(
+                execution_options={
+                    "isolation_level": "REPEATABLE READ",
+                    "postgresql_readonly": True,
+                }
+            )
+        except Exception as exc:
+            raise ErroreConnessione("sorgente") from exc
+        try:
+            await dest.connection()
+        except Exception as exc:
+            raise ErroreConnessione("destinazione") from exc
         team_sorg = await _team_id(sorg, mappa.team, "sorgente")
         team_dest = await _team_id(dest, mappa.team, "destinazione")
         progetti = (
@@ -533,16 +681,23 @@ async def copia(
     """
     propri: list[AsyncEngine] = []
 
-    def _motore(valore: str | AsyncEngine) -> AsyncEngine:
+    def _motore(valore: str | AsyncEngine, lato: str) -> AsyncEngine:
         if isinstance(valore, str):
-            motore = create_async_engine(url_async(valore))
+            try:
+                motore = create_async_engine(url_async(valore))
+            except Exception as exc:  # malformed URL, missing driver: never echo it
+                raise ErroreConnessione(lato) from exc
             propri.append(motore)
             return motore
         return valore
 
     try:
         return await _copia_con_motori(
-            _motore(sorgente), _motore(destinazione), mappa, da_istante, solo_conteggi
+            _motore(sorgente, "sorgente"),
+            _motore(destinazione, "destinazione"),
+            mappa,
+            da_istante,
+            solo_conteggi,
         )
     finally:
         for motore in propri:
@@ -565,6 +720,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ErroreCopia as exc:
         print(f"errore: {exc}", file=sys.stderr)
         return 2
+    except Exception as exc:  # nothing else may leak a traceback or a URL
+        print(f"errore: copia fallita ({type(exc).__name__})", file=sys.stderr)
+        return 1
     print(formatta_rapporto(rapporto))
     return 0
 

@@ -20,7 +20,9 @@ from scripts.copy_memories import (
     Conteggi,
     ErroreCopia,
     Mappa,
+    PianoMemoria,
     Rapporto,
+    RigaMemoria,
     SlugSenzaDecisione,
     StatoMemoria,
 )
@@ -288,3 +290,149 @@ def test_mappa_is_immutable() -> None:
     mappa = Mappa("t", frozenset({"a"}), frozenset())
     with pytest.raises(AttributeError):
         mappa.team = "x"  # type: ignore[misc]
+
+
+# --- generations ----------------------------------------------------------------------------
+
+T0 = datetime(2026, 10, 1, tzinfo=UTC)
+T1 = T0 + timedelta(days=5)
+
+
+def _r(keyword: str, creata: datetime, version: int = 1, cancellata: bool = False) -> RigaMemoria:
+    return RigaMemoria(keyword, creata, version, cancellata)
+
+
+def test_keyword_base_strips_only_the_rename_suffix() -> None:
+    assert cm.keyword_base("redis#deleted#12") == "redis"
+    assert cm.keyword_base("redis") == "redis"
+    assert cm.keyword_base("a#deleted#1#deleted#2") == "a#deleted#1"
+    assert cm.keyword_base("redis#deleted#") == "redis#deleted#"
+    assert cm.keyword_base("redis#deleted#x") == "redis#deleted#x"
+    assert cm.e_rinominata("redis#deleted#12") and not cm.e_rinominata("redis")
+
+
+def test_keyword_da_parte_has_the_apps_form() -> None:
+    assert cm.keyword_da_parte("k", 7) == "k#deleted#7"
+
+
+def test_generation_identity_ignores_the_suffix_but_not_created_at() -> None:
+    assert cm.identita_generazione("k#deleted#3", T0) == cm.identita_generazione("k", T0)
+    assert cm.identita_generazione("k", T0) != cm.identita_generazione("k", T1)
+
+
+def test_same_generation_follows_the_version_rules() -> None:
+    piano = cm.pianifica_memoria(_r("k", T0, 3), _r("k", T0, 2), _r("k", T0, 2))
+    assert piano == PianoMemoria(Azione.AGGIORNA)
+    assert cm.pianifica_memoria(_r("k", T0, 2), _r("k", T0, 2), _r("k", T0, 2)).azione is (
+        Azione.NULLA
+    )
+
+
+def test_same_key_different_created_at_is_a_new_generation_not_an_update() -> None:
+    # The scenario of the review: deleted v3 on the destination, recreated v1 on the source.
+    piano = cm.pianifica_memoria(_r("k", T1, 1), None, _r("k", T0, 3, cancellata=True))
+    assert piano.azione is Azione.INSERISCI
+    assert piano.metti_da_parte is True
+    assert piano.cancella_occupante is False  # already deleted: keep its state
+    # even with a higher source version there is no AGGIORNA across generations
+    assert cm.pianifica_memoria(_r("k", T1, 9), None, _r("k", T0, 1)).azione is Azione.INSERISCI
+
+
+def test_live_occupant_of_another_generation_is_deleted_when_set_aside() -> None:
+    piano = cm.pianifica_memoria(_r("k", T1), None, _r("k", T0, 2, cancellata=False))
+    assert piano == PianoMemoria(Azione.INSERISCI, metti_da_parte=True, cancella_occupante=True)
+
+
+def test_free_keyword_is_a_plain_insert() -> None:
+    assert cm.pianifica_memoria(_r("k", T1), None, None) == PianoMemoria(Azione.INSERISCI)
+
+
+def test_renamed_source_row_matches_by_base_and_created_at() -> None:
+    # Destination holds the same generation under its own suffix: nothing to do.
+    sorgente = _r("k#deleted#5", T0, 3, cancellata=True)
+    gia = _r("k#deleted#99", T0, 3, cancellata=True)
+    assert cm.pianifica_memoria(sorgente, gia, None).azione is Azione.NULLA
+    # ...or live on the destination at the same version: the delete is propagated.
+    assert cm.pianifica_memoria(sorgente, _r("k", T0, 3), _r("k", T0, 3)).azione is (
+        Azione.AGGIORNA
+    )
+
+
+def test_renamed_source_row_is_inserted_with_the_destination_suffix_never_its_own() -> None:
+    piano = cm.pianifica_memoria(_r("k#deleted#5", T0, 3, cancellata=True), None, None)
+    assert piano == PianoMemoria(Azione.INSERISCI, keyword_con_id_destinazione=True)
+    assert piano.metti_da_parte is False  # the plain keyword is not in play
+
+
+def test_second_run_plans_nothing() -> None:
+    """After a run every source row has its generation on the destination."""
+    sorgente = [
+        _r("k#deleted#5", T0, 3, cancellata=True),
+        _r("k", T1, 2),
+        _r("altro", T0, 1),
+    ]
+    destinazione = [
+        _r("k#deleted#77", T0, 3, cancellata=True),
+        _r("k", T1, 2),
+        _r("altro", T0, 1),
+    ]
+    per_gen = {cm.identita_generazione(d.keyword, d.created_at): d for d in destinazione}
+    occupanti = {d.keyword: d for d in destinazione if not cm.e_rinominata(d.keyword)}
+    for s in sorgente:
+        piano = cm.pianifica_memoria(
+            s,
+            per_gen.get(cm.identita_generazione(s.keyword, s.created_at)),
+            occupanti.get(s.keyword),
+        )
+        assert piano == PianoMemoria(Azione.NULLA), s
+
+
+def test_generation_compare_is_what_separates_the_scenarios() -> None:
+    """Guard that READS the code: the planner must compare created_at."""
+    assert "created_at" in inspect.getsource(cm.identita_generazione)
+    assert "identita_generazione(" in inspect.getsource(cm._copia_progetto)
+    assert "pianifica_memoria(" in inspect.getsource(cm._copia_progetto)
+
+
+# --- connection failures ------------------------------------------------------------------------
+
+
+def test_main_connection_failure_is_one_short_line_without_url_or_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ok = tmp_path / "m.json"
+    ok.write_text(json.dumps(_dati()), encoding="utf-8")
+
+    def _rotto(*_a, **_k):
+        raise OSError("password authentication failed for postgresql://u:segreto@h/db")
+
+    monkeypatch.setattr(cm, "create_async_engine", _rotto)
+    code = cm.main(
+        ["--from", "postgresql://u:segreto@h/db", "--to", "postgresql://u:segreto@h/db"]
+        + ["--mappa", str(ok)]
+    )
+    err = capsys.readouterr().err
+    assert code != 0
+    assert err.strip() == "errore: connessione fallita (sorgente)"
+    assert "segreto" not in err and "Traceback" not in err
+
+
+def test_main_unexpected_failure_never_leaks_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ok = tmp_path / "m.json"
+    ok.write_text(json.dumps(_dati()), encoding="utf-8")
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("dettaglio con postgresql://u:segreto@h/db")
+
+    monkeypatch.setattr(cm, "copia", _boom)
+    code = cm.main(["--from", "x", "--to", "y", "--mappa", str(ok)])
+    err = capsys.readouterr().err
+    assert code != 0 and "segreto" not in err and "Traceback" not in err
+    assert err.count(chr(10)) == 1
+
+
+def test_source_session_is_read_only_repeatable_read() -> None:
+    sorgente = inspect.getsource(cm._copia_con_motori)
+    assert "REPEATABLE READ" in sorgente and "postgresql_readonly" in sorgente

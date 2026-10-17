@@ -123,7 +123,7 @@ async def _seed(motore: AsyncEngine) -> None:
         await svc.create_entry(s, tid, "beta", "stale-entry", "not embedded yet", "erin")
 
 
-async def _vec(valore: object) -> list[float] | None:
+def _vec(valore: object) -> list[float] | None:
     return None if valore is None else [float(x) for x in valore]  # type: ignore[attr-defined]
 
 
@@ -151,10 +151,10 @@ async def _istantanea(motore: AsyncEngine, slug_esclusi: set[str] | None = None)
                 "content": m.content,
                 "version": m.version,
                 "token_count": m.token_count,
-                "embedding": await _vec(m.embedding),
+                "embedding": _vec(m.embedding),
                 "embedding_stale": m.embedding_stale,
                 "embedding_model": m.embedding_model,
-                "keyword_embedding": await _vec(m.keyword_embedding),
+                "keyword_embedding": _vec(m.keyword_embedding),
                 "updated_by": m.updated_by,
                 "deleted_at": m.deleted_at,
                 "created_at": m.created_at,
@@ -324,7 +324,12 @@ async def test_embeddings_copied_as_is_and_search_is_identical(
         assert [(r["keyword"], r["score"]) for r in r2["results"]] == [
             (r["keyword"], r["score"]) for r in r1["results"]
         ]
-        assert r2 == r1
+        assert [(r["keyword"], r["score"], r["excerpt"]) for r in r2["results"]] == [
+            (r["keyword"], r["score"], r["excerpt"]) for r in r1["results"]
+        ]
+        assert [(r["keyword"], r["score"]) for r in r2["related_keywords"]] == [
+            (r["keyword"], r["score"]) for r in r1["related_keywords"]
+        ]
 
 
 # --- (d) counts per slug --------------------------------------------------------
@@ -425,7 +430,8 @@ async def test_reverse_copy_with_da_istante_brings_back_only_new_writes(
         if chiave not in toccate:
             assert dopo[chiave] == valore
     # The window leaves out entries with nothing newer than the instant.
-    assert rapporto.per_slug["alfa"].attive < 4
+    assert rapporto.per_slug["alfa"].attive == 2  # nuova-voce and redis-cache
+    assert rapporto.per_slug["alfa"].cancellate == 0
 
     # And a second reverse run changes nothing.
     await cm.copia(nuovo, vecchio, MAPPA, da_istante=istante)
@@ -478,3 +484,148 @@ async def test_team_is_resolved_by_name_not_by_id(
             (await s.execute(select(Project.team_id).distinct())).scalars().all()
         )
     assert team_dei_progetti == {tid_dst}
+
+
+# --- generations: delete + recreate after the cutover -------------------------------------
+
+
+async def _righe(motore: AsyncEngine, slug: str, base: str) -> list[dict]:
+    """Every generation of `base` in `slug`, oldest first, with its attachments."""
+    async with _sess(motore)() as s:
+        memorie = (
+            (
+                await s.execute(
+                    select(Memory)
+                    .join(Project, Project.id == Memory.project_id)
+                    .where(
+                        Project.slug == slug,
+                        (Memory.keyword == base) | Memory.keyword.like(f"{base}#deleted#%"),
+                    )
+                    .order_by(Memory.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        out = []
+        for m in memorie:
+            frammenti = (
+                await s.execute(select(MemoryFragment).where(MemoryFragment.memory_id == m.id))
+            ).scalars()
+            storico = (
+                await s.execute(select(MemoryHistory).where(MemoryHistory.memory_id == m.id))
+            ).scalars()
+            out.append(
+                {
+                    "keyword": m.keyword,
+                    "content": m.content,
+                    "version": m.version,
+                    "deleted": m.deleted_at is not None,
+                    "created_at": m.created_at,
+                    "frammenti": sorted(f.content for f in frammenti),
+                    "storico": sorted(h.version for h in storico),
+                }
+            )
+        return out
+
+
+async def test_recreated_entry_after_cutover_comes_back_as_its_own_generation(
+    motori: tuple[AsyncEngine, AsyncEngine],
+) -> None:
+    vecchio, nuovo = motori
+    await _seed(vecchio)  # "vecchia" is soft-deleted at v1 here
+    await cm.copia(vecchio, nuovo, MAPPA)
+    istante = await _now(nuovo)
+    await asyncio.sleep(0.05)
+
+    tid = await _team_id(nuovo)
+    async with _sess(nuovo)() as s:
+        # delete_entry would refuse (already deleted): recreate straight away,
+        # the app renames the deleted row aside by itself.
+        await svc.create_entry(s, tid, "alfa", "vecchia", "seconda generazione", "frank")
+        await svc.append_fragment(s, tid, "alfa", "vecchia", "frammento nuovo", "frank")
+        await svc.compact_entry(
+            s, tid, "alfa", "vecchia", "seconda generazione v2", 1, None, "gina"
+        )
+    sul_nuovo = await _righe(nuovo, "alfa", "vecchia")
+    assert [r["deleted"] for r in sul_nuovo] == [True, False]
+
+    prima = (await _righe(vecchio, "alfa", "vecchia"))[0]
+    await cm.copia(nuovo, vecchio, MAPPA, da_istante=istante)
+    sul_vecchio = await _righe(vecchio, "alfa", "vecchia")
+
+    assert len(sul_vecchio) == 2
+    vecchia_gen, nuova_gen = sul_vecchio
+    # The old generation row is untouched, still deleted, with its own history.
+    assert vecchia_gen["deleted"] is True
+    assert vecchia_gen["content"] == prima["content"] and vecchia_gen["storico"] == prima["storico"]
+    assert vecchia_gen["frammenti"] == prima["frammenti"]
+    assert vecchia_gen["keyword"].startswith("vecchia#deleted#")
+    # The recreated entry is live on the old DB, with its own history and fragment.
+    assert nuova_gen["keyword"] == "vecchia"
+    assert nuova_gen["deleted"] is False
+    assert nuova_gen["content"] == "seconda generazione v2" and nuova_gen["version"] == 2
+    assert nuova_gen["storico"] == [1, 2]
+    assert nuova_gen["frammenti"] == ["frammento nuovo"]
+    assert nuova_gen["created_at"] == sul_nuovo[1]["created_at"]
+
+    # A second reverse run plans nothing.
+    dopo = await _istantanea(vecchio)
+    secondo = await cm.copia(nuovo, vecchio, MAPPA, da_istante=istante)
+    assert await _istantanea(vecchio) == dopo
+    assert secondo.da_scrivere["alfa"] == cm.Conteggi()
+
+
+async def test_forward_copy_renames_a_different_generation_aside_like_the_app(
+    motori: tuple[AsyncEngine, AsyncEngine],
+) -> None:
+    """Same (project, keyword), different created_at on the two sides."""
+    vecchio, nuovo = motori
+    tid_v, tid_n = await _team_id(vecchio), await _team_id(nuovo)
+    async with _sess(nuovo)() as s:
+        await svc.create_entry(s, tid_n, "alfa", "k", "generazione sul nuovo", "ann")
+    await asyncio.sleep(0.05)
+    async with _sess(vecchio)() as s:
+        await svc.create_entry(s, tid_v, "alfa", "k", "generazione sul vecchio", "bob")
+
+    await cm.copia(vecchio, nuovo, MAPPA)
+    righe = await _righe(nuovo, "alfa", "k")
+    assert len(righe) == 2
+    messa_da_parte, copiata = righe
+    assert messa_da_parte["content"] == "generazione sul nuovo"
+    assert messa_da_parte["keyword"].startswith("k#deleted#") and messa_da_parte["deleted"]
+    assert copiata["keyword"] == "k" and copiata["deleted"] is False
+    assert copiata["content"] == "generazione sul vecchio"
+
+    dopo = await _istantanea(nuovo)
+    await cm.copia(vecchio, nuovo, MAPPA)
+    assert await _istantanea(nuovo) == dopo
+
+
+async def test_renamed_source_row_never_reuses_the_source_suffix(
+    motori: tuple[AsyncEngine, AsyncEngine],
+) -> None:
+    vecchio, nuovo = motori
+    tid = await _team_id(vecchio)
+    async with _sess(vecchio)() as s:
+        await svc.create_entry(s, tid, "alfa", "k", "prima", "ann")
+        await svc.delete_entry(s, tid, "alfa", "k", "ann")
+        await svc.create_entry(s, tid, "alfa", "k", "seconda", "ann")
+    # Occupy ids on the destination so that suffixes would differ.
+    tid_n = await _team_id(nuovo)
+    async with _sess(nuovo)() as s:
+        for i in range(3):
+            await svc.create_entry(s, tid_n, "alfa", f"zz-{i}", "riempitivo", "ann")
+    async with _sess(vecchio)() as s:
+        suffisso_sorgente = (
+            await s.execute(select(Memory.keyword).where(Memory.keyword.like("k#deleted#%")))
+        ).scalar_one()
+
+    await cm.copia(vecchio, nuovo, MAPPA)
+    async with _sess(nuovo)() as s:
+        riga = (
+            await s.execute(select(Memory).where(Memory.keyword.like("k#deleted#%")))
+        ).scalar_one()
+    assert riga.keyword == f"k#deleted#{riga.id}"
+    assert riga.keyword != suffisso_sorgente
+    assert [r["deleted"] for r in await _righe(nuovo, "alfa", "k")] == [True, False]
