@@ -60,6 +60,11 @@ SLUG_INPUTS: list[str] = [
     "İstanbul",
     "日本語",
     "a-_-b",
+    "a\x1fb",
+    "a﻿b",
+    "a b",
+    "a b",
+    "Kelvin",
 ]
 
 
