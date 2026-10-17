@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Minimum length of ARCHIVIST_SERVICE_SECRET: a shorter (or missing) value
+# leaves the service-auth mode on /mcp switched OFF.
+SERVICE_SECRET_MIN_LENGTH = 32
 
 # Single source for the embedding dimension on the app side (bge-small-en-v1.5
 # output = 384). Migration 0002 creates the matching ``vector(N)`` column; the
@@ -50,6 +55,12 @@ class Settings(BaseSettings):
     # Admin console (server-rendered /admin). If unset, an ephemeral secret is
     # generated at startup and sessions reset on restart — set this in prod.
     admin_session_secret: str | None = None
+
+    # Service-auth mode on /mcp, for the Workspace Node service only
+    # (``Authorization: Bearer <secret>`` + ``X-Archivist-Team``). Read from
+    # ARCHIVIST_SERVICE_SECRET. Unset or shorter than SERVICE_SECRET_MIN_LENGTH
+    # => the mode is off and only ``arc_`` keys authenticate.
+    service_secret: str | None = Field(default=None, validation_alias="ARCHIVIST_SERVICE_SECRET")
 
     # Trusted proxy hosts for X-Forwarded-For/-Proto (uvicorn's
     # ProxyHeadersMiddleware, wired in create_app). Behind Caddy the immediate

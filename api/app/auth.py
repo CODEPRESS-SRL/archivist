@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import secrets
 import time
 from contextvars import ContextVar
@@ -28,13 +29,20 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app import db, errors
-from app.config import get_settings
+from app.config import SERVICE_SECRET_MIN_LENGTH, get_settings
 from app.log import get_logger
 from app.models import ApiKey, Team
 
 logger = get_logger()
 
 API_KEY_PREFIX = "arc_"
+
+# Service-auth mode (Workspace Node only): ``Authorization: Bearer
+# <ARCHIVIST_SERVICE_SECRET>`` + ``X-Archivist-Team: <team name>``.
+SERVICE_KEY_ID = 0
+SERVICE_OWNER_NAME = "workspace"
+SERVICE_TEAM_HEADER = b"x-archivist-team"
+SERVICE_TEAM_MAX_LENGTH = 64
 
 # Canonical UNAUTHORIZED / RATE_LIMITED errors (Appendix C); code + text live in
 # ``app.errors``, the single source (T1.6). Re-exported here for the 401/429
@@ -111,6 +119,25 @@ async def lookup_auth_context(session: AsyncSession, key_hash: str) -> AuthConte
     )
 
 
+async def lookup_team_context(session: AsyncSession, team_name: str) -> AuthContext | None:
+    """Resolve a team name (exact match) to the service AuthContext, or None.
+
+    Used only by the service-auth mode: the Workspace Node names the team in
+    ``X-Archivist-Team``. A team that does not exist is NEVER created here.
+    The context carries ``key_id=0`` (no ``api_keys`` row) and
+    ``owner_name="workspace"``.
+    """
+    row = (await session.execute(select(Team.id, Team.name).where(Team.name == team_name))).first()
+    if row is None:
+        return None
+    return AuthContext(
+        key_id=SERVICE_KEY_ID,
+        owner_name=SERVICE_OWNER_NAME,
+        team_id=row.id,
+        team_name=row.name,
+    )
+
+
 def generate_api_key() -> str:
     """Return a fresh plaintext key: ``arc_`` + 32 url-safe random bytes."""
     return API_KEY_PREFIX + secrets.token_urlsafe(32)
@@ -159,12 +186,55 @@ def _extract_bearer(scope: Scope) -> str | None:
     return None
 
 
+def service_mode_secret(secret: str | None) -> str | None:
+    """Return the service secret if the mode is ON, else None.
+
+    The mode is off when the secret is unset or shorter than
+    ``SERVICE_SECRET_MIN_LENGTH`` — a weak/absent secret must never open /mcp.
+    """
+    if secret is None or len(secret) < SERVICE_SECRET_MIN_LENGTH:
+        return None
+    return secret
+
+
+def is_service_bearer(token: str, secret: str | None) -> bool:
+    """True iff service mode is on and ``token`` equals the secret (constant time)."""
+    active = service_mode_secret(secret)
+    if active is None:
+        return False
+    return hmac.compare_digest(token.encode("utf-8"), active.encode("utf-8"))
+
+
+def validate_team_header(raw: str | None) -> str | None:
+    """Return the team name if the header value is acceptable, else None.
+
+    Rejected: missing/empty, longer than 64 characters, or any control
+    character (CR, LF, NUL, ...) — the value is never trimmed or normalised,
+    the match against ``teams.name`` is exact.
+    """
+    if not raw or len(raw) > SERVICE_TEAM_MAX_LENGTH:
+        return None
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in raw):
+        return None
+    return raw
+
+
+def _extract_team_header(scope: Scope) -> str | None:
+    """The single ``X-Archivist-Team`` value, validated; None if absent, repeated or invalid."""
+    values = [v for n, v in scope.get("headers", []) if n == SERVICE_TEAM_HEADER]
+    if len(values) != 1:
+        return None
+    return validate_team_header(values[0].decode("latin-1"))
+
+
 class AuthMiddleware:
     """ASGI middleware enforcing Bearer auth on the ``/mcp`` path."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self._rate_limit = get_settings().rate_limit_per_minute
+        settings = get_settings()
+        self._rate_limit = settings.rate_limit_per_minute
+        self._service_secret = settings.service_secret
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not _is_protected(scope["path"]):
@@ -174,6 +244,22 @@ class AuthMiddleware:
         token = _extract_bearer(scope)
         if token is None:
             await _unauthorized(scope, receive, send)
+            return
+
+        # Service mode (Workspace Node): checked BEFORE the key lookup. A bearer
+        # that is not the secret falls through to the ``arc_`` path unchanged.
+        # No rate limit (the Node enforces its own) and no last_used_at touch.
+        if is_service_bearer(token, self._service_secret):
+            team_name = _extract_team_header(scope)
+            ctx = await self._lookup_team(team_name) if team_name is not None else None
+            if ctx is None:
+                await _unauthorized(scope, receive, send)
+                return
+            reset = current_key.set(ctx)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                current_key.reset(reset)
             return
 
         ctx = await self._lookup(hash_api_key(token))
@@ -195,6 +281,10 @@ class AuthMiddleware:
     async def _lookup(self, key_hash: str) -> AuthContext | None:
         async with db.SessionFactory() as session:
             return await lookup_auth_context(session, key_hash)
+
+    async def _lookup_team(self, team_name: str) -> AuthContext | None:
+        async with db.SessionFactory() as session:
+            return await lookup_team_context(session, team_name)
 
 
 def _touch_last_used(key_id: int) -> None:
