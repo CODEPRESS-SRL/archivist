@@ -238,3 +238,75 @@ touch them.
 `git checkout <prev-tag>` where a clone exists) → `up -d --build api`. If a
 migration corrupted data or a downgrade is not clean, restore the pre-upgrade
 dump from step 1 using scenario 4.
+
+---
+
+## 6. Su *nova*, dietro Workspace
+
+**Context:** on the VPS *nova* Archivist is **private**. No Caddy, no public
+vhost, no `arc_` key reachable from the internet: the only client is the
+Workspace Node, which authenticates with the service secret and reaches the api
+over a dedicated Docker network. Use `docker-compose.nova.yml` instead of
+`docker-compose.prod.yml` (the commands elsewhere in this file take the same
+flags, swapping the file name).
+
+**Networks (fixed):**
+
+- `interna` (`internal: true`): `db`, `api`, `embed-worker`. The database has no
+  gateway and is invisible to the Node.
+- `memoria` (name **`archivist-memoria`**): holds only the `api`. It is created
+  by **this** stack; the Workspace compose joins it as `external`, so Archivist
+  must be up (network created) before the Node starts.
+- The only host port is `127.0.0.1:3006` → api `8000`, for `/admin`.
+
+**Secrets file.** Compose refuses to start without these, so create `.env` in
+the app dir first, outside any volume and never in a backup:
+
+```bash
+install -m 600 /dev/null .env
+cat >> .env <<'ENV'
+POSTGRES_PASSWORD=<strong random>
+ARCHIVIST_SERVICE_SECRET=<min 32 chars, the same value the Node uses>
+ADMIN_SESSION_SECRET=<stable random, so /admin sessions survive restarts>
+ENV
+ls -l .env     # -rw------- expected
+```
+
+`ARCHIVIST_SERVICE_SECRET` must be **at least 32 characters**: a shorter value
+turns service auth off silently and the Node gets 401. Rotating it means editing
+`.env` here **and** the Node's variable, then `up -d --force-recreate api`.
+
+**Start.** The `api` runs `alembic upgrade head` at every boot (idempotent), so
+migrations apply on their own:
+
+```bash
+docker compose -p archivist -f docker-compose.nova.yml up -d
+docker compose -p archivist -f docker-compose.nova.yml ps      # api healthy
+docker compose -p archivist -f docker-compose.nova.yml logs --tail=100 api
+```
+
+**Backup.** `scripts/backup.sh` reads `COMPOSE_FILE` and `DB_EXEC` from the
+environment and defaults to the prod file, so on *nova* pass the nova file and
+project explicitly (dumps go to `/var/backups/archivist/arc_YYYYMMDD.dump`,
+14-day retention, outside the volumes):
+
+```bash
+COMPOSE_FILE=docker-compose.nova.yml \
+DB_EXEC="docker compose -p archivist -f docker-compose.nova.yml exec -T db" \
+  ./scripts/backup.sh
+```
+
+Restore (scenario 4) takes the same two variables:
+`COMPOSE_FILE=docker-compose.nova.yml DB_EXEC="…" ./scripts/restore.sh <dump>`.
+
+**`/admin` console.** It is not published. From your machine open an SSH tunnel
+to the VPS loopback port and browse locally:
+
+```bash
+ssh -L 3006:127.0.0.1:3006 <vps>      # then http://127.0.0.1:3006/admin
+```
+
+**Health from the Node's side:** the Node checks `GET /healthz` on the `api`
+over `archivist-memoria`. If it reports Archivist down, start from scenario 1
+(`ps`, `logs api`, `logs db`) using the nova compose file; there is no front
+proxy to check.

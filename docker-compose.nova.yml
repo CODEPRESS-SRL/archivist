@@ -1,0 +1,108 @@
+# Private stack on the VPS "nova": Archivist sits BEHIND the Workspace Node.
+# No Caddy, no public vhost. Run from the app dir with:
+#   docker compose -p archivist -f docker-compose.nova.yml up -d
+# Config comes from .env on the server (chmod 600, never committed, outside
+# volumes and backups). See RUNBOOK.md, "Su nova, dietro Workspace".
+#
+# Networks:
+#   interna  internal: true, db + api + embed-worker. No gateway: the database
+#            cannot reach, or be reached from, anything else (the Node included).
+#   memoria  fixed name `archivist-memoria`. Created by THIS stack; the Workspace
+#            Node joins it as `external`. Holds only the api.
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      # Only for the /admin console, reached through an SSH tunnel to the VPS
+      # loopback. The Node talks to the api over `archivist-memoria`, not this port.
+      - "127.0.0.1:3006:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-archivist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set a strong secret in .env)}@db:5432/${POSTGRES_DB:-archivist}
+      # Service secret of the Workspace Node (Authorization: Bearer on /mcp).
+      # Mandatory, at least 32 characters: shorter or missing switches the mode off.
+      ARCHIVIST_SERVICE_SECRET: ${ARCHIVIST_SERVICE_SECRET:?ARCHIVIST_SERVICE_SECRET is required (min 32 characters, shared with the Workspace Node)}
+      # /admin session signing key, stable so sessions survive restarts.
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?ADMIN_SESSION_SECRET is required (a stable secret so /admin sessions survive restarts)}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Migrations run at every boot (alembic upgrade head is idempotent).
+    command:
+      - sh
+      - -c
+      - >
+        alembic upgrade head &&
+        exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000
+    healthcheck:
+      # /healthz runs SELECT 1, so a healthy api implies a reachable db too.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - interna
+      - memoria
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-archivist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set a strong secret in .env)}
+      POSTGRES_DB: ${POSTGRES_DB:-archivist}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-archivist} -d ${POSTGRES_DB:-archivist}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - interna
+
+  embed-worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-archivist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set a strong secret in .env)}@db:5432/${POSTGRES_DB:-archivist}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    networks:
+      - interna
+
+networks:
+  interna:
+    internal: true
+  memoria:
+    # Fixed name: the Workspace compose declares it `external` under this name.
+    name: archivist-memoria
+
+volumes:
+  pgdata:
