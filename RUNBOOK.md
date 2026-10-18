@@ -299,6 +299,75 @@ DB_EXEC="docker compose -p archivist -f docker-compose.nova.yml exec -T db" \
 Restore (scenario 4) takes the same two variables:
 `COMPOSE_FILE=docker-compose.nova.yml DB_EXEC="…" ./scripts/restore.sh <dump>`.
 
+**Scheduled, verified backup (install).** `deploy/nova/archivist-backup.sh`
+wraps `scripts/backup.sh` with the nova settings (`/var/backups/archivist-nova`,
+14 days), then **reopens** the dump with `pg_restore -l` inside the `db`
+container (a missing, unreadable or empty dump fails the run) and mirrors the
+directory with `rsync --delete` to a second machine. `OFFSITE_DEST` is
+mandatory: without an offsite copy the run is a failure, not a warning. The
+timer fires daily at **04:40 UTC**; failure is loud on two channels (unit
+`failed` + `OnFailure=` writing `/var/lib/archivist-backup/last-failure` and a
+journal entry at `err` priority). A stale `/var/lib/archivist-backup/last-success`
+means the timer is not firing, which `OnFailure=` cannot see.
+
+Install on *nova* (as root, from the app dir; the offsite user and its
+`rrsync`-confined key are a one-off step done by hand, no secret in any file):
+
+```bash
+cd /home/deploy/apps/archivist
+chmod 700 deploy/nova/archivist-backup.sh
+install -m 600 /dev/null /etc/default/archivist-backup
+echo 'OFFSITE_DEST=<user>@<offsite-host>:/' >> /etc/default/archivist-backup
+# optional: OFFSITE_KEY=/root/.ssh/id_ed25519_archivist_backup (this is the default)
+install -m 644 deploy/nova/archivist-backup.service        /etc/systemd/system/
+install -m 644 deploy/nova/archivist-backup-failed.service /etc/systemd/system/
+install -m 644 deploy/nova/archivist-backup.timer          /etc/systemd/system/
+install -d -m 700 /var/backups/archivist-nova
+install -d -m 755 /var/lib/archivist-backup
+systemctl daemon-reload
+systemctl enable --now archivist-backup.timer
+systemctl list-timers archivist-backup.timer --no-pager
+```
+
+Run one round by hand and check it end to end (do this at install time, **before
+the cutover**):
+
+```bash
+systemctl start archivist-backup.service
+journalctl -u archivist-backup -n 30 --no-pager      # "backup: ... ok"
+ls -l /var/backups/archivist-nova/ /var/lib/archivist-backup/last-success
+```
+
+**Restore tests (run both once, at install time, not only on paper).**
+
+1. *Dump is readable and complete* — list the table of contents of the newest
+   dump and check the application tables are there:
+   ```bash
+   dump=$(ls -t /var/backups/archivist-nova/arc_*.dump | head -1)
+   docker compose -p archivist -f docker-compose.nova.yml exec -T db \
+     pg_restore -l < "$dump" | grep -E 'TABLE DATA .* (memories|projects|teams)'
+   ```
+2. *Restore into a scratch database, never into production* — prove the dump
+   restores and the row count matches the live database:
+   ```bash
+   docker compose -p archivist -f docker-compose.nova.yml exec -T db \
+     createdb -U archivist arc_restore_test
+   docker compose -p archivist -f docker-compose.nova.yml exec -T db \
+     pg_restore -U archivist -d arc_restore_test --no-owner < "$dump"
+   for d in archivist arc_restore_test; do
+     docker compose -p archivist -f docker-compose.nova.yml exec -T db \
+       psql -U archivist -d "$d" -tAc "SELECT count(*) FROM memories;"
+   done                                    # the two counts must agree
+   docker compose -p archivist -f docker-compose.nova.yml exec -T db \
+     dropdb -U archivist arc_restore_test
+   ```
+3. *Offsite copy is the same file* — compare checksums of the newest dump on
+   *nova* and on the offsite host (`sha256sum`), and confirm the offsite listing
+   has no `.arc_*` or `*.partial` file.
+
+The live restore itself (scenario 4) stays destructive and prompts for the
+database name; use it only for a real recovery.
+
 **`/admin` console.** It is not published. From your machine open an SSH tunnel
 to the VPS loopback port and browse locally:
 

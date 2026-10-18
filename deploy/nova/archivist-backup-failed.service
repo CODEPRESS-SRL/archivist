@@ -1,0 +1,11 @@
+[Unit]
+Description=Segnale di fallimento del backup di Archivist su nova (WSP-85)
+# Attivata da OnFailure= di archivist-backup.service. Non ha timer: parte solo
+# quando il backup fallisce davvero.
+
+[Service]
+Type=oneshot
+# Il file cita righe di journal del giro fallito: nasce a 600 (umask 077). I `%%`
+# sono il `%` letterale per systemd. Il messaggio va a priorita' `err`, visibile
+# con `journalctl -p err` e `systemctl --failed`.
+ExecStart=/bin/sh -c 'install -d -m 755 /var/lib/archivist-backup; umask 077; { date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ; echo "unit: archivist-backup.service"; echo "--- ultime righe di journal ---"; journalctl -u archivist-backup.service -n 20 --no-pager; } > /var/lib/archivist-backup/last-failure; echo "backup di Archivist FALLITO: vedi /var/lib/archivist-backup/last-failure" | systemd-cat -t archivist-backup -p err'

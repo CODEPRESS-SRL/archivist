@@ -1,0 +1,24 @@
+[Unit]
+# WSP-85 — backup verificato del database di Archivist su *nova*: dump,
+# riapertura con pg_restore -l, mirror offsite. Il fallimento e' visibile,
+# perche' *nova* non ha un MTA.
+Description=Backup verificato del database di Archivist su nova (WSP-85)
+After=docker.service
+Wants=docker.service
+# Senza questa riga un fallimento resterebbe una unit `failed` che nessuno guarda.
+OnFailure=archivist-backup-failed.service
+
+[Service]
+Type=oneshot
+# Cartella dello stack: deve corrispondere a dove vive il clone su nova.
+WorkingDirectory=/home/deploy/apps/archivist
+# OFFSITE_DEST (e, se serve, OFFSITE_KEY) stanno qui: niente segreti, solo la
+# destinazione. Il file e' facoltativo perche' sia lo script a rifiutare, con un
+# messaggio leggibile, un giro senza destinazione.
+EnvironmentFile=-/etc/default/archivist-backup
+ExecStart=/home/deploy/apps/archivist/deploy/nova/archivist-backup.sh
+# *nova* non ha swap e ospita due runner CI: il backup non deve contendere CPU
+# o disco a un build in corso.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=900

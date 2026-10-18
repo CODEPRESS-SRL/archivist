@@ -1,0 +1,16 @@
+[Unit]
+Description=Timer del backup verificato del database di Archivist su nova (WSP-85)
+
+[Timer]
+# UTC esplicito: l'host e' Europe/Berlin e fissare il fuso evita che l'orario
+# salti al cambio dell'ora legale. Alle 04:40, dopo i backup di Workspace
+# (04:10) e di Plane (03:30), fuori dalle finestre piu' calde dei runner CI.
+OnCalendar=*-*-* 04:40:00 UTC
+RandomizedDelaySec=300
+# Se la VPS era spenta all'orario previsto, recupera il giro all'avvio invece
+# di saltarlo in silenzio fino al giorno dopo.
+Persistent=true
+Unit=archivist-backup.service
+
+[Install]
+WantedBy=timers.target
