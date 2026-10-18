@@ -13,13 +13,13 @@
 services:
   api:
     # nova never builds (no swap, little disk): the image is built elsewhere and
-    # loaded with scripts/carica-immagine-nova.sh. `build:` stays so the same
-    # compose can build it locally; api and embed-worker share this one image.
+    # loaded with scripts/carica-immagine-nova.sh. There is NO `build:` here on
+    # purpose: with `build:` present and the image missing, compose up would
+    # build it on the VPS. A missing image must fail with image-not-found.
+    # The local build lives in docker-compose.nova.build.yml (override).
+    # api and embed-worker share this one image.
     image: archivist-api:${ARCHIVIST_TAG:?ARCHIVIST_TAG is required (the tag loaded with scripts/carica-immagine-nova.sh)}
     pull_policy: never
-    build:
-      context: ./api
-      dockerfile: Dockerfile
     restart: unless-stopped
     logging:
       driver: json-file
@@ -86,9 +86,6 @@ services:
     # Same image as the api (same Dockerfile): one image built and loaded.
     image: archivist-api:${ARCHIVIST_TAG:?ARCHIVIST_TAG is required (the tag loaded with scripts/carica-immagine-nova.sh)}
     pull_policy: never
-    build:
-      context: ./api
-      dockerfile: Dockerfile
     restart: unless-stopped
     logging:
       driver: json-file

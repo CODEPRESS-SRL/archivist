@@ -1,0 +1,11 @@
+# LOCAL-ONLY override: never copied to or used on the VPS "nova".
+# Adds the build to the api service so the image can be built off nova:
+#   docker compose -p archivist -f docker-compose.nova.yml -f docker-compose.nova.build.yml build api
+# (scripts/carica-immagine-nova.sh does exactly this.) embed-worker shares the
+# api image, so it needs no build of its own.
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile

@@ -17,6 +17,7 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 _COMPOSE = _REPO / "docker-compose.nova.yml"
+_BUILD_OVERRIDE = _REPO / "docker-compose.nova.build.yml"
 _SCRIPT = _REPO / "scripts" / "carica-immagine-nova.sh"
 
 _COMPOSE_FLAGS = "-p archivist -f docker-compose.nova.yml"
@@ -65,19 +66,33 @@ def test_service_runs_the_prebuilt_image_and_never_pulls(service: str) -> None:
     assert re.search(r"^    pull_policy: never$", block, re.MULTILINE)
 
 
-@pytest.mark.parametrize("service", ["api", "embed-worker"])
-def test_service_keeps_build_so_the_image_can_be_built_locally(service: str) -> None:
-    block = _service_block(service)
-    assert re.search(r"^    build:$", block, re.MULTILINE)
-    assert "context: ./api" in block
+def test_nova_compose_has_no_build_at_all() -> None:
+    # With `build:` present and the image missing, `compose up` BUILDS instead of
+    # failing even under pull_policy: never. nova must fail with image-not-found.
+    code = "\n".join(_code_lines(_COMPOSE))
+    assert not re.search(r"^\s*build:", code, re.MULTILINE)
+    assert "dockerfile:" not in code
+
+
+def test_build_override_exists_and_adds_only_the_api_build() -> None:
+    assert _BUILD_OVERRIDE.is_file(), "docker-compose.nova.build.yml is missing"
+    code = "\n".join(_code_lines(_BUILD_OVERRIDE))
+    assert re.search(r"^  api:$", code, re.MULTILINE)
+    assert re.search(r"^    build:$", code, re.MULTILINE)
+    assert "context: ./api" in code
+    assert "dockerfile: Dockerfile" in code
+    assert "embed-worker" not in code
+    assert "image:" not in code
+
+
+def _image_of(service: str) -> str:
+    match = re.search(r"^    image: (.+)$", _service_block(service), re.MULTILINE)
+    assert match, f"{service}: no image:"
+    return match.group(1).strip()
 
 
 def test_api_and_worker_share_one_image_name() -> None:
-    images = [
-        re.search(r"^    image: (.+)$", _service_block(s), re.MULTILINE).group(1).strip()  # type: ignore[union-attr]
-        for s in ("api", "embed-worker")
-    ]
-    assert images[0] == images[1]
+    assert _image_of("api") == _image_of("embed-worker")
 
 
 def test_db_image_is_not_touched() -> None:
@@ -104,9 +119,26 @@ def test_script_refuses_an_empty_tag() -> None:
     assert "export ARCHIVIST_TAG" in text
 
 
-def test_script_builds_with_project_and_file() -> None:
+def test_script_builds_with_both_compose_files() -> None:
     text = _text(_SCRIPT)
-    assert f"docker compose {_COMPOSE_FLAGS} build" in text
+    assert f"docker compose {_COMPOSE_FLAGS} -f docker-compose.nova.build.yml build api" in text
+
+
+def test_script_validates_the_tag_before_using_it() -> None:
+    text = _text(_SCRIPT)
+    # The tag ends up in a remote shell string: only a closed alphabet passes.
+    assert "^[A-Za-z0-9_.-]+$" in text
+    assert text.index("^[A-Za-z0-9_.-]+$") < text.index("docker compose -p")
+
+
+def test_script_compares_the_architecture_too() -> None:
+    text = _text(_SCRIPT)
+    assert text.count("{{.Architecture}}") >= 2
+    assert re.search(r'\[\[ "\$\{local_arch\}" != "\$\{remote_arch\}" \]\]', text)
+
+
+def test_script_documents_the_same_image_store_assumption() -> None:
+    assert "image store" in _text(_SCRIPT)
 
 
 def test_script_transfers_with_save_and_load_over_batch_ssh() -> None:
@@ -124,7 +156,7 @@ def test_script_compares_the_image_id_before_and_after() -> None:
     assert "exit 1" in text
 
 
-@pytest.mark.parametrize("path", [_COMPOSE, _SCRIPT], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [_COMPOSE, _BUILD_OVERRIDE, _SCRIPT], ids=lambda p: p.name)
 def test_every_docker_compose_names_project_and_file(path: Path) -> None:
     # Comments included: a copy-pasted comment is how a bare command sneaks in.
     for line in _text(path).splitlines():
