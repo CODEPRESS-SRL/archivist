@@ -309,6 +309,26 @@ async def test_embeddings_copied_as_is_and_search_is_identical(
         assert b[chiave]["keyword_embedding"] == a[chiave]["keyword_embedding"]
 
     tid_src, tid_dst = await _team_id(src), await _team_id(dst)
+
+    # Known behaviour change (N7): a discarded slug is not copied, so scope "all"
+    # on the destination never reaches it, while the source still does. Pin it
+    # here, then drop the slug from the source so the scores below (rank-based)
+    # are compared between equivalent corpora.
+    async with _sess(src)() as s1, _sess(dst)() as s2:
+        tutti_src = await hybrid_search(s1, FakeEmbedder(), tid_src, "alfa", "notes", 5, "all")
+        tutti_dst = await hybrid_search(s2, FakeEmbedder(), tid_dst, "alfa", "notes", 5, "all")
+    assert "rumore" in {r["keyword"] for r in tutti_src["results"]}
+    assert "rumore" not in {r["keyword"] for r in tutti_dst["results"]}
+    async with _sess(src)() as s:
+        await s.execute(
+            text(
+                "DELETE FROM memories WHERE project_id IN "
+                "(SELECT id FROM projects WHERE slug = 'scarto')"
+            )
+        )
+        await s.execute(text("DELETE FROM projects WHERE slug = 'scarto'"))
+        await s.commit()
+
     interrogazioni = [
         ("alfa", "redis caching", "project"),
         ("alfa", "deploy", "project"),
