@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # => the mode is off and only ``arc_`` keys authenticate.
     service_secret: str | None = Field(default=None, validation_alias="ARCHIVIST_SERVICE_SECRET")
 
+    # Service-only mode on /mcp. Read from ARCHIVIST_SERVICE_ONLY; OFF by default,
+    # which is today's behaviour. Set ON on the private stack behind the Workspace
+    # Node: /mcp then refuses every bearer that is not the service secret above,
+    # so a valid ``arc_`` key gets 401 and cannot bypass the Node to read every
+    # project's memory directly. FAIL-CLOSED: with the flag ON and the secret
+    # unset or shorter than SERVICE_SECRET_MIN_LENGTH, /mcp authenticates nobody.
+    # /admin is not affected: its console keeps its own credentials.
+    service_secret_only: bool = Field(default=False, validation_alias="ARCHIVIST_SERVICE_ONLY")
+
     # Trusted proxy hosts for X-Forwarded-For/-Proto (uvicorn's
     # ProxyHeadersMiddleware, wired in create_app). Behind Caddy the immediate
     # peer is a Docker-network address, so the private ranges are trusted while

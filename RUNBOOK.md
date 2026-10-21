@@ -276,6 +276,23 @@ ls -l .env     # -rw------- expected
 turns service auth off silently and the Node gets 401. Rotating it means editing
 `.env` here **and** the Node's variable, then `up -d --force-recreate api`.
 
+**/mcp answers only to the Node.** The compose file sets
+`ARCHIVIST_SERVICE_ONLY: "true"` (a literal, deliberately not a `${...}` from
+`.env`) so `/mcp` refuses **every** bearer that is not the service secret above:
+a valid `arc_` key gets the canonical 401, byte for byte like a garbage token,
+and nothing can bypass the Node to read every project's memory directly. Point an
+agent at the **Workspace** MCP door, never at the Python on *nova*. `/admin` is
+unchanged (it has its own credentials and stays on the loopback tunnel). It is
+fail-closed *and loud*: with `ARCHIVIST_SERVICE_SECRET` missing or shorter than
+32 characters the api **refuses to start** — the container never reports healthy
+— instead of serving `/mcp` to nobody. Proving the flag means creating one `arc_`
+key, checking it gets 401, and revoking it in the same session: the "zero active
+`arc_` keys" check of the Workspace release checklist must hold again afterwards
+(`SELECT count(*) FROM api_keys WHERE NOT revoked` must be 0). **Rollback:** set
+`ARCHIVIST_TAG` in `.env` back to the previous tag and
+`docker compose -p archivist -f docker-compose.nova.yml up -d --force-recreate
+api` (previous image, no migration involved).
+
 **Start.** The `api` runs `alembic upgrade head` at every boot (idempotent), so
 migrations apply on their own:
 

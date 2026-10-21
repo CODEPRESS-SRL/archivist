@@ -235,6 +235,17 @@ class AuthMiddleware:
         settings = get_settings()
         self._rate_limit = settings.rate_limit_per_minute
         self._service_secret = settings.service_secret
+        self._service_only = settings.service_secret_only
+        if self._service_only and service_mode_secret(self._service_secret) is None:
+            # Fail-closed and loud: a stack that would serve /mcp to nobody must
+            # not boot "healthy". Starlette builds this stack before the app
+            # answers, uvicorn's first scope is the lifespan one, so this raise
+            # is a startup failure, not a request-time one.
+            raise RuntimeError(
+                "ARCHIVIST_SERVICE_ONLY is on but ARCHIVIST_SERVICE_SECRET is missing "
+                f"or shorter than {SERVICE_SECRET_MIN_LENGTH} characters: /mcp would "
+                "refuse every bearer. Fix the secret or unset the flag."
+            )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not _is_protected(scope["path"]):
@@ -260,6 +271,12 @@ class AuthMiddleware:
                 await self.app(scope, receive, send)
             finally:
                 current_key.reset(reset)
+            return
+
+        # Service-only mode: the only way in is the secret above, so an ``arc_`` key
+        # is refused here, before the lookup, and gets the canonical 401.
+        if self._service_only:
+            await _unauthorized(scope, receive, send)
             return
 
         ctx = await self._lookup(hash_api_key(token))

@@ -8,12 +8,15 @@ end-to-end tests with a real Postgres are in ``test_service_auth.py``.
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 
 import pytest
 
 from app import auth
 from app.auth import (
+    UNAUTHORIZED_CODE,
+    UNAUTHORIZED_MESSAGE,
     AuthContext,
     AuthMiddleware,
     current_key,
@@ -46,6 +49,27 @@ def test_service_secret_read_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_min_length_constant() -> None:
     assert SERVICE_SECRET_MIN_LENGTH == 32
     assert "service_secret" in Settings.model_fields
+
+
+def test_service_only_defaults_to_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ARCHIVIST_SERVICE_ONLY", raising=False)
+    get_settings.cache_clear()
+    assert "service_secret_only" in Settings.model_fields
+    assert get_settings().service_secret_only is False
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("true", True), ("false", False)])
+def test_service_only_read_from_env(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: bool
+) -> None:
+    # The compose sets the literal ``"true"``: without this the string → bool
+    # link is untested, and a rename of the field or of the alias would leave
+    # every suite green while the deployed flag silently stayed off.
+    monkeypatch.setenv("ARCHIVIST_SERVICE_ONLY", raw)
+    get_settings.cache_clear()
+    assert get_settings().service_secret_only is expected
+    get_settings.cache_clear()
 
 
 # --- secret comparison -----------------------------------------------------
@@ -119,8 +143,14 @@ def _scope(headers: list[tuple[bytes, bytes]]) -> dict:
     return {"type": "http", "path": "/mcp", "method": "POST", "headers": headers}
 
 
-def _middleware(monkeypatch: pytest.MonkeyPatch, secret: str | None, rec: _Recorder):
+def _middleware(
+    monkeypatch: pytest.MonkeyPatch,
+    secret: str | None,
+    rec: _Recorder,
+    service_only: bool = False,
+):
     monkeypatch.setattr(get_settings(), "service_secret", secret)
+    monkeypatch.setattr(get_settings(), "service_secret_only", service_only)
     mw = AuthMiddleware(rec.app)
     lookups: list[str] = []
 
@@ -137,6 +167,21 @@ def _middleware(monkeypatch: pytest.MonkeyPatch, secret: str | None, rec: _Recor
     monkeypatch.setattr(mw, "_lookup_team", _team)
     monkeypatch.setattr(mw, "_lookup", _key)
     return mw, lookups
+
+
+KEY_CONTEXT = AuthContext(key_id=5, owner_name="acme key", team_id=2, team_name="acme")
+
+
+def _key_lookup_returning(
+    monkeypatch: pytest.MonkeyPatch, mw: AuthMiddleware, lookups: list[str], ctx: AuthContext | None
+) -> None:
+    """Replace the key lookup with one that WOULD authenticate, while recording it."""
+
+    async def _key(key_hash: str) -> AuthContext | None:
+        lookups.append("key")
+        return ctx
+
+    monkeypatch.setattr(mw, "_lookup", _key)
 
 
 def _service_headers(team: bytes | None = b"codepress", secret: str = SECRET):
@@ -225,6 +270,56 @@ async def test_service_path_skips_rate_limit_and_last_used(
     assert auth._rate_state == {}
 
 
+# --- service-only mode on /mcp (ARCHIVIST_SERVICE_ONLY) ---------------------
+
+
+async def test_service_only_refuses_a_valid_arc_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = _Recorder()
+    mw, lookups = _middleware(monkeypatch, SECRET, rec, service_only=True)
+    _key_lookup_returning(monkeypatch, mw, lookups, KEY_CONTEXT)
+    await mw(_scope([(b"authorization", b"Bearer arc_valid")]), _receive, rec.send)
+    assert rec.status == 401
+    assert json.loads(rec.sent[1]["body"]) == {
+        "error": {"code": UNAUTHORIZED_CODE, "message": UNAUTHORIZED_MESSAGE}
+    }
+    assert rec.app_called is False
+    assert lookups == []  # the key path is never consulted
+
+
+async def test_service_only_still_admits_the_service_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = _Recorder()
+    mw, _ = _middleware(monkeypatch, SECRET, rec, service_only=True)
+    await mw(_scope(_service_headers()), _receive, rec.send)
+    assert rec.status == 200
+    assert rec.reached == AuthContext(0, "workspace", 7, "codepress")
+
+
+async def test_flag_off_keeps_the_key_path_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = _Recorder()
+    mw, lookups = _middleware(monkeypatch, SECRET, rec, service_only=False)
+    _key_lookup_returning(monkeypatch, mw, lookups, KEY_CONTEXT)
+    monkeypatch.setattr(auth, "_touch_last_used", lambda key_id: None)
+    auth.reset_rate_limiter()
+    await mw(_scope([(b"authorization", b"Bearer arc_valid")]), _receive, rec.send)
+    assert rec.status == 200
+    assert rec.reached == KEY_CONTEXT
+    assert lookups == ["key"]
+
+
+@pytest.mark.parametrize("secret", [None, "", "x" * 31])
+def test_service_only_refuses_to_start_without_a_usable_secret(
+    monkeypatch: pytest.MonkeyPatch, secret: str | None
+) -> None:
+    # Fail-closed AND loud: a stack that would serve /mcp to nobody must not boot
+    # healthy (a silent memory outage is worse than a failed healthcheck).
+    monkeypatch.setattr(get_settings(), "service_secret", secret)
+    monkeypatch.setattr(get_settings(), "service_secret_only", True)
+    with pytest.raises(RuntimeError, match="ARCHIVIST_SERVICE_ONLY"):
+        AuthMiddleware(_Recorder().app)
+
+
 # --- guards that read the code --------------------------------------------
 
 
@@ -238,6 +333,12 @@ def test_guard_service_check_runs_before_key_lookup() -> None:
     source = Path(inspect.getsourcefile(auth.AuthMiddleware)).read_text(encoding="utf-8")
     body = source[source.index("async def __call__") :]
     assert body.index("is_service_bearer(") < body.index("self._lookup(hash_api_key")
+
+
+def test_guard_service_only_refusal_runs_before_key_lookup() -> None:
+    source = Path(inspect.getsourcefile(auth.AuthMiddleware)).read_text(encoding="utf-8")
+    body = source[source.index("async def __call__") :]
+    assert body.index("self._service_only") < body.index("self._lookup(hash_api_key")
 
 
 def test_guard_secret_never_logged_or_returned() -> None:

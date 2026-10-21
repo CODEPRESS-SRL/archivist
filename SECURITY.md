@@ -40,7 +40,7 @@ anonymous users. Exposed surface: only `443` (front proxy) + `22` (SSH).
 | Area | Control |
 |---|---|
 | Transport | TLS via the front proxy (Caddy/Let's Encrypt or shared nginx/certbot), HSTS, 80→443 redirect |
-| Auth | Bearer API key `arc_*`; only SHA-256 stored; revocation via CLI |
+| Auth | Bearer API key `arc_*`; only SHA-256 stored; revocation via CLI. On the private stack behind the Workspace Node: `/mcp` refuses every bearer but the service secret (`ARCHIVIST_SERVICE_ONLY`, see below) |
 | Network | api and db without host ports in prod; internal Docker network |
 | Input | Keyword/project normalized server-side; FTS queries via `plainto_tsquery` (never interpolation); parameters always bound (SQLAlchemy) |
 | Rate limit | 120 req/min per key → 429 |
@@ -101,6 +101,49 @@ or expiring key can be replaced without touching the team's archive:
 See `tests/test_tenancy.py` (cross-team isolation: `get`/`create`/`append`/
 `delete`/`search scope=all` all NOT_FOUND-bounded to the caller's team) and
 `tests/test_admin_cli.py` (`key-issue`, rotation, `--revoke-old`).
+
+## Service-only mode on /mcp (private stack behind the Workspace Node)
+
+On the *nova* stack (`docker-compose.nova.yml`) the api is private and the
+Workspace Node is the only door to the memory. The compose sets
+`ARCHIVIST_SERVICE_ONLY: "true"`, and the auth middleware then refuses, on
+`/mcp`, **every** bearer that is not `ARCHIVIST_SERVICE_SECRET` — a valid
+`arc_` key never reaches the key lookup and gets the canonical 401, byte for
+byte identical to a garbage token (no existence oracle). Without the flag the
+behaviour is unchanged, so a direct deployment keeps the `arc_` path.
+
+- **Fail-closed and loud.** With the flag ON and `ARCHIVIST_SERVICE_SECRET`
+  unset or shorter than 32 characters, the app **refuses to start**: the
+  middleware raises while the stack is built, so the container never reports
+  healthy. It never falls back to the key path, and never boots healthy while
+  refusing every bearer (that would be a silent outage, not an alarm).
+- **`/admin` is unaffected**: it keeps its own `arc_` credential and never goes
+  through this middleware.
+- **What `/admin` is protected by: credentials only.** The api listens on
+  `0.0.0.0:8000` inside the stack and is reachable from both `interna` and
+  `memoria`; the loopback publish is a convenience for the SSH tunnel, not a
+  boundary. `FORWARDED_ALLOW_IPS` trusts those networks for `X-Forwarded-For`,
+  and the login throttle keys on that value.
+- **Premise.** No public vhost, no Caddy, and `archivist-memoria` carrying only
+  the api.
+- **Residual:** the `/admin` console reads every project. Its keys follow the
+  rule "create for the session, revoke immediately", and the "zero active
+  `arc_` keys" check (`SELECT count(*) FROM api_keys WHERE NOT revoked` = 0)
+  runs in the **Workspace** release checklist before a deploy.
+- **Residual, structural:** with the flag ON the whole `/mcp` boundary is the
+  service secret plus the `X-Archivist-Team` header the Node sends. A leaked
+  secret or a compromised Node is then worth a leaked `arc_` key, and tenancy on
+  that path is decided by the Node, not here.
+- **Threshold that reopens the risk:** an `arc_` key handed to someone without
+  root on the host, port 3006 exposed beyond the loopback, a vhost for the api,
+  a second container joining `archivist-memoria`, or a stack running a compose
+  file other than `docker-compose.nova.yml` (the guard pins that file, not the
+  running container).
+
+Covered by `tests/test_service_auth_unit.py` (both branches, the string → bool
+link from the environment, the startup refusal, ordering guard),
+`tests/test_service_auth.py` (end to end, key untouched) and
+`tests/test_nova_compose.py` (the flag is set on the api and nowhere else).
 
 ## Admin console (/admin)
 

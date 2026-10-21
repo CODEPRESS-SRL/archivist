@@ -16,10 +16,16 @@ from sqlalchemy import func, select
 
 from app import auth
 from app import db as app_db
-from app.auth import UNAUTHORIZED_MESSAGE, create_team, current_key, reset_rate_limiter
+from app.auth import (
+    UNAUTHORIZED_MESSAGE,
+    create_team,
+    current_key,
+    hash_api_key,
+    reset_rate_limiter,
+)
 from app.config import get_settings
 from app.main import create_app
-from app.models import Team
+from app.models import ApiKey, Team
 
 SECRET = "s" * 40
 
@@ -28,9 +34,12 @@ def _client(app: object) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://arc.test")
 
 
-def _app_with_probe(monkeypatch: pytest.MonkeyPatch, secret: str | None = SECRET):
+def _app_with_probe(
+    monkeypatch: pytest.MonkeyPatch, secret: str | None = SECRET, service_only: bool = False
+):
     """App with a probe under /mcp echoing the auth context set by the middleware."""
     monkeypatch.setattr(get_settings(), "service_secret", secret)
+    monkeypatch.setattr(get_settings(), "service_secret_only", service_only)
     app = create_app()
 
     async def _probe() -> JSONResponse:
@@ -108,6 +117,26 @@ async def test_arc_key_still_works_identically(seed_team, monkeypatch: pytest.Mo
     assert body["team_name"] == "acme"
     assert body["key_id"] != 0
     assert body["owner"] == "acme key"
+
+
+async def test_service_only_mode_refuses_a_valid_arc_key(
+    seed_team, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, plaintext = await seed_team("acme")
+    app = _app_with_probe(monkeypatch, service_only=True)
+    async with _client(app) as client:
+        response = await client.get("/mcp/probe", headers={"Authorization": f"Bearer {plaintext}"})
+    assert response.status_code == 401
+    assert response.json()["error"]["message"] == UNAUTHORIZED_MESSAGE
+    # The app was never reached and the key was not even resolved: last_used_at
+    # stays NULL, exactly as for a key that does not exist.
+    async with app_db.SessionFactory() as session:
+        last_used = (
+            await session.execute(
+                select(ApiKey.last_used_at).where(ApiKey.key_hash == hash_api_key(plaintext))
+            )
+        ).scalar_one()
+    assert last_used is None
 
 
 @pytest.mark.parametrize("team", ["acme\r\nX-Evil: 1", "a" * 65])

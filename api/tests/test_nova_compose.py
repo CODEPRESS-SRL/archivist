@@ -55,6 +55,17 @@ def test_secrets_are_mandatory_and_reach_api(compose: dict, name: str) -> None:
     assert value.startswith("${" + name + ":?")
 
 
+def test_api_answers_only_to_the_service_secret(compose: dict) -> None:
+    # A literal, not a ``${...}`` from .env: on nova /mcp must refuse every
+    # ``arc_`` key, whatever the environment file says (ARC-1).
+    assert compose["services"]["api"]["environment"]["ARCHIVIST_SERVICE_ONLY"] == "true"
+
+
+@pytest.mark.parametrize("service", ["embed-worker", "db"])
+def test_service_only_flag_is_api_only(compose: dict, service: str) -> None:
+    assert "ARCHIVIST_SERVICE_ONLY" not in compose["services"][service]["environment"]
+
+
 def test_memoria_network_has_fixed_name_and_is_not_internal(compose: dict) -> None:
     memoria = compose["networks"]["memoria"]
     assert memoria["name"] == "archivist-memoria"

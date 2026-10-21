@@ -35,6 +35,11 @@ services:
       # Service secret of the Workspace Node (Authorization: Bearer on /mcp).
       # Mandatory, at least 32 characters: shorter or missing switches the mode off.
       ARCHIVIST_SERVICE_SECRET: ${ARCHIVIST_SERVICE_SECRET:?ARCHIVIST_SERVICE_SECRET is required (min 32 characters, shared with the Workspace Node)}
+      # /mcp here answers ONLY to that service secret: a valid arc_ key gets 401,
+      # so no agent can bypass the Node and read every project's memory directly.
+      # /admin is unaffected (SSH tunnel). A literal on purpose, NOT ${...} from
+      # .env: it is a property of this stack, not a per-host setting.
+      ARCHIVIST_SERVICE_ONLY: "true"
       # /admin session signing key, stable so sessions survive restarts.
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?ADMIN_SESSION_SECRET is required (a stable secret so /admin sessions survive restarts)}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
