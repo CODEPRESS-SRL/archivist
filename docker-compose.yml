@@ -1,0 +1,85 @@
+# Dev stack: Postgres + the Archivist API with hot reload.
+# Prod (Caddy, no host ports, TLS) lives in docker-compose.prod.yml.
+# Config comes from .env (copy .env.example → .env). Defaults below keep
+# `make up` working out of the box for local development.
+
+name: archivist-dev
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-archivist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archivist}
+      POSTGRES_DB: ${POSTGRES_DB:-archivist}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # DEV ONLY: expose Postgres to the host for `make psql` / GUI clients.
+    # Prod never publishes this port (see SECURITY.md — dev vs prod surface).
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      # Gate `api` on a DB that actually accepts connections, not just a
+      # running process.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-archivist} -d ${POSTGRES_DB:-archivist}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Point the app at the compose network's db service, not localhost.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://archivist:archivist@db:5432/archivist}
+    depends_on:
+      db:
+        condition: service_healthy
+    # DEV ONLY: bind-mount the source so uvicorn --reload sees host edits,
+    # and publish 8000 for direct access. In prod Caddy fronts the api and
+    # no host port is published (see SECURITY.md).
+    volumes:
+      - ./api/app:/app/app:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    # Apply migrations, then serve with hot reload. alembic upgrade head is
+    # idempotent, so this is safe on every restart. exec makes uvicorn PID 1.
+    command:
+      - sh
+      - -c
+      - >
+        alembic upgrade head &&
+        exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      # /healthz runs SELECT 1, so a healthy api implies a reachable db too.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  embed-worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://archivist:archivist@db:5432/archivist}
+      ENABLE_HYBRID_SEARCH: ${ENABLE_HYBRID_SEARCH:-true}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    volumes:
+      - ./api/app:/app/app:ro
+
+volumes:
+  pgdata:

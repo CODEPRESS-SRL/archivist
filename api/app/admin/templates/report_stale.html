@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/admin">&larr; projects</a></p>
+<h1>Stale entries (&gt; {{ min_age_days }} days)</h1>
+{% if not rows %}<p>Nothing stale — every entry was updated in the last {{ min_age_days }} days.</p>{% endif %}
+<table>
+  <thead><tr><th>Project</th><th>Keyword</th><th>Age (days)</th><th>Last updated</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.project }}</td>
+      <td><a href="/admin/memory/{{ r.keyword }}?project={{ r.project }}">{{ r.keyword }}</a></td>
+      <td>{{ r.age_days }}</td>
+      <td>{{ r.updated_at.strftime('%Y-%m-%d') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

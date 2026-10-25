@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/admin">&larr; projects</a></p>
+<h1>Near-duplicate keywords (&ge; {{ threshold }} similarity)</h1>
+{% if not rows %}<p>No near-duplicate keyword pairs above {{ threshold }}.</p>{% endif %}
+<table>
+  <thead><tr><th>Project</th><th>Keyword A</th><th>Keyword B</th><th>Similarity</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.project }}</td>
+      <td><a href="/admin/memory/{{ r.keyword_a }}?project={{ r.project }}">{{ r.keyword_a }}</a></td>
+      <td><a href="/admin/memory/{{ r.keyword_b }}?project={{ r.project }}">{{ r.keyword_b }}</a></td>
+      <td>{{ r.similarity }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

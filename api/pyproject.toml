@@ -1,0 +1,48 @@
+[project]
+name = "archivist-api"
+version = "1.2.0"
+license = "MIT"
+authors = [{ name = "Codepress S.r.l. and contributors" }]
+description = "Archivist — shared keyword memory for coding agents (remote MCP server)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "mcp",
+    "tiktoken",
+    "pydantic-settings",
+    "pgvector>=0.4.2",
+    "fastembed>=0.8.0",
+    "jinja2",
+    "itsdangerous",
+    "python-multipart",
+    "markdown",
+    "nh3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "testcontainers[postgres]",
+    "ruff",
+    "httpx",
+    "pyyaml",
+]
+
+# The API is a deployable service, not a distributable library: uv manages
+# the environment and dependencies but does not build/install the project.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+# `auto` lets async test/fixture functions run without a per-function marker.
+asyncio_mode = "auto"

@@ -1,0 +1,5 @@
+[
+  {"id": "aaa-div", "query": "dividend aaa", "pattern": "0\\.10", "category": "old", "available_from": "2026-01-01"},
+  {"id": "ccc-div", "query": "dividend ccc", "pattern": "0\\.05", "category": "old", "available_from": "2026-01-01"},
+  {"id": "ccc-move", "query": "ccc price move", "pattern": "5\\.5", "category": "recent", "available_from": "2026-01-02"}
+]

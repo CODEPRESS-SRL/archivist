@@ -1,0 +1,10 @@
+{
+  "record": {
+    "asset": "string, ticker or slug",
+    "date": "string, ISO YYYY-MM-DD",
+    "title": "string",
+    "body": "string",
+    "facts": [{"type": "string", "value": "string", "unit": "string|null"}]
+  },
+  "notes": "One JSON object per line (JSONL). Ordered by (asset, date)."
+}
