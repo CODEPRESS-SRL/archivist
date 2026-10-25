@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # ---- Runtime: slim image, non-root, just the venv + application code ----
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.15-slim-bookworm AS runtime
 
 # Dedicated unprivileged user/group; the process never runs as root
 # (SECURITY.md — Container control).
